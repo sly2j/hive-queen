@@ -1,6 +1,6 @@
 # Plan: queen launcher registry, launcher choice, trust dialogue and naming
 
-Status: implemented (S1-S5), landed on main as `c0dab66` (squash of branch `feat/queen-launcher-registry`, tip `402d89d`); manual queen check with the user still open. Base `ca37171`.
+Status: implemented (S1-S5), landed on main as `c0dab66` (squash of branch `feat/queen-launcher-registry`, tip `402d89d`); manual queen check passed (user-confirmed 2026-10-23). Base `ca37171`.
 
 ## Goal
 
@@ -273,6 +273,7 @@ None.
 ## Log
 
 - 2026-10-22 imported from the sibling worktree `claude-rc-hive-launcher-registry`. Verified: main `c0dab66` tree equals branch tip `402d89d` except `VERSION`; all S1-S5 symbols and tests present on main; `uv run pytest -q` on main: 328 passed. Not verified: the manual queen check over remote control.
+- 2026-10-23 decision: user reports the manual queen check over remote control passed; all Todo items complete.
 
 ## Todo
 
@@ -285,4 +286,4 @@ None.
 - [x] S4 `append_launcher`, `set_default_launcher`, `resolve_launcher`, `launchers add|default`
 - [x] S4 tests pass
 - [x] S5 queen CLAUDE.md dialogue, guard tests
-- [ ] Full suite passes; manual queen check with the user
+- [x] Full suite passes; manual queen check with the user
