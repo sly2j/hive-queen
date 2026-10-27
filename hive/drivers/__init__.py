@@ -1,9 +1,10 @@
 """Agent systems hive can run in a pane (config key `system`); each driver holds what is
-specific to one system. Only `claude` exists so far."""
+specific to one system: `claude` (the default) and `codex`."""
 
 from typing import Protocol
 
 from hive.drivers.claude import ClaudeDriver
+from hive.drivers.codex import CodexDriver
 
 
 class Driver(Protocol):
@@ -23,6 +24,7 @@ class Driver(Protocol):
     required_placeholders: tuple[str, ...]  # a launcher command must contain each one
     config_dir_env_msg: str | None  # why hive never sets config_dir_env
     waiting_kinds: tuple[tuple[str, tuple[str, ...]], ...]  # (kind, screen phrases)
+    keep_session_msg: str | None  # why `stop --keep-session` cannot keep a session, None = it can
 
     def trust_state(self, directory, config_dir): ...  # (trust root, trust file, trusted?)
     def seed_trust(self, root, config_dir): ...
@@ -36,7 +38,7 @@ class Driver(Protocol):
     def queen_extras(self, command, args): ...  # command plus the queen's restricting flags
 
 
-DRIVERS = {"claude": ClaudeDriver()}
+DRIVERS = {"claude": ClaudeDriver(), "codex": CodexDriver()}
 DEFAULT_SYSTEM = "claude"
 KNOWN_SYSTEMS = ("claude", "opencode", "codex")
 

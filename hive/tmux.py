@@ -95,8 +95,9 @@ def setup_pane(cfg, pane, pane_id):
     """Title, tag, and type the command into a freshly created pane; return the session id."""
     driver = get_driver(pane.system)
     resume_id = sessions.pending_resume(cfg, pane.name)  # set by `hive spawn --resume`
-    session_id = (resume_id or driver.prepare_launch({**cfg["env"], **(pane.env or {})}, pane)
-                  or str(uuid.uuid4()))
+    # prepare_launch runs on resume too (Codex ensures its daemon); a resume keeps its own id.
+    prepared = driver.prepare_launch({**cfg["env"], **(pane.env or {})}, pane)
+    session_id = resume_id or prepared or str(uuid.uuid4())
     tmux(cfg, "select-pane", "-t", pane_id, "-T", pane.name)
     # Keep apps from overwriting the title; ignore tmux versions without the option.
     tmux(cfg, "set-option", "-p", "-t", pane_id, "allow-set-title", "off", check=False)

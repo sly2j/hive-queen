@@ -154,7 +154,7 @@ def test_system_key(tmp_path, capsys):
             load_config()
         err = capsys.readouterr().err
         assert exc.value.code == 2
-        assert f"'{key}' = 'x': unknown system 'x' (known: claude)" in err
+        assert f"'{key}' = 'x': unknown system 'x' (known: claude, codex)" in err
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")

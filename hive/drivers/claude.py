@@ -51,6 +51,7 @@ class ClaudeDriver:
     versions = ("2.1.311",)
     required_placeholders = ("{name}",)
     config_dir_env_msg = CONFIG_DIR_ENV_MSG
+    keep_session_msg = None
     waiting_kinds = (("trust", TRUST_PROMPT_PHRASES),
                      ("theme", ("choose the text style",)),
                      ("login", ("select login method",)),

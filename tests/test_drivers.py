@@ -104,11 +104,11 @@ def test_prepare_launch_claude_none():
 
 
 def test_get_driver_known_but_unregistered(tmp_path, monkeypatch, capsys):
-    with pytest.raises(ValueError, match="system 'codex' is not in this release"):
-        get_driver("codex")
+    with pytest.raises(ValueError, match="system 'opencode' is not in this release"):
+        get_driver("opencode")
     cfg = tmp_path / "xdg" / "hive" / "config.toml"
     cfg.parent.mkdir(parents=True)
-    cfg.write_text('prefix = "t"\n\n[defaults]\nsystem = "codex"\n')
+    cfg.write_text('prefix = "t"\n\n[defaults]\nsystem = "opencode"\n')
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     with pytest.raises(SystemExit) as exc:
         load_config()
@@ -117,7 +117,7 @@ def test_get_driver_known_but_unregistered(tmp_path, monkeypatch, capsys):
 
 
 def test_get_driver_unknown_text():
-    with pytest.raises(ValueError, match=r"unknown system 'nope' \(known: claude\)"):
+    with pytest.raises(ValueError, match=r"unknown system 'nope' \(known: claude, codex\)"):
         get_driver("nope")
 
 

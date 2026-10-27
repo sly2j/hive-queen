@@ -61,6 +61,7 @@ To start the hive at login, run `hive install-service --enable` on Linux, or fol
 - [Configuration](docs/configuration.md): every key in `config.toml`, validation rules, placeholders, applying changes.
 - [Commands](docs/commands.md): every `hive` command, its output and exit codes.
 - [Queen](docs/queen.md): what the queen does and its security model.
+- [Codex](docs/systems/codex.md): Codex CLI workers, the one-time remote-control pairing, trust and hooks.
 - [Launchers](docs/launchers.md): named launch commands, such as a wrapper with its own Claude config dir.
 - [Workspace trust](docs/trust.md): how hive checks and seeds Claude Code's folder trust.
 - [Run at login](docs/service.md): the systemd user unit on Linux, a LaunchAgent on macOS.

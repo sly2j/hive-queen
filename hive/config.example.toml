@@ -19,7 +19,7 @@
 # {session_id} (fresh UUID per pane launch; without it the driver appends its session flag, for claude `--session-id <uuid>`)
 command = "claude -n {name} --remote-control {name} --permission-mode auto --session-id {session_id}"
 # launcher = "claude"            # default launcher for new types; a [[launchers]] name or a discover name
-# system = "claude"              # agent system that runs the commands; only "claude" in this release. Also settable
+# system = "claude"              # agent system that runs the commands: "claude" or "codex" (docs/systems/). Also settable
 #   per [[launchers]], per [[agents]] and in [queen]; precedence: agent > launcher > defaults > claude.
 # args = ["--fable"]            # extra launcher flags: list of non-empty strings, each shell-quoted (placeholders expanded first).
 #   Placed at {args} in the command, else appended at the end. A per-type or [queen] args replaces this list, no merge.
@@ -66,6 +66,8 @@ command = "claude -n {name} --remote-control {name} --permission-mode auto --ses
 # count = 1                        # panes; default 1; 0 keeps the entry without panes
 # indices = [2, 3]                 # instead of count: explicit instance numbers (written by `hive stop --index`); exclusive with count
 # system = "claude"                # optional; default: [defaults] system (`hive spawn --launcher` writes the launcher's); no command = that system's default command
+#   A Codex worker: system = "codex" without command runs "codex {args} -a never -s workspace-write" in ~/.codex; pair the
+#   machine once (codex remote-control start, then codex remote-control pair) and leave config_dir unset (docs/systems/codex.md).
 # command = "claude -n {name} --remote-control {name}"   # optional per-type override of defaults.command
 # config_dir = "~/.claude-sandbox"   # optional: Claude config dir of this type's command; only used to find the trust file <config_dir>/.claude.json, never exported
 # args = ["--fable"]                 # optional per-type args; replaces defaults.args (also: hive spawn --arg=--fable)

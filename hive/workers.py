@@ -426,6 +426,11 @@ def cmd_stop(cfg, args):
     entries = {a["type"]: a for a in cfg["agents"]}
     names = [f"{kind}-{cfg['prefix']}-{i}" for kind, remove in changes.items()
              for i in sorted(remove)]
+    if args.keep_session:
+        for kind in changes:
+            msg = get_driver(entries[kind]["system"]).keep_session_msg
+            if msg:
+                die(f"{msg}; nothing changed. Stop it without --keep-session", 1)
     kept = kept_ids(cfg, names) if args.keep_session else None  # before the panes go
     new = {kind: [i for i in agent_indices(entries[kind]) if i not in remove]
            for kind, remove in changes.items()}

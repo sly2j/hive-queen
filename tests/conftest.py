@@ -48,6 +48,7 @@ class FakeDriver:
     install_hint = "install fake-agent from example.org"
     versions = ("1.0.0",)
     waiting_kinds = ()
+    keep_session_msg = None
 
     def __init__(self):
         import re
