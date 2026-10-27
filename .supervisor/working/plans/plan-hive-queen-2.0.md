@@ -278,7 +278,7 @@ Pointers are into the current tree (`hive/cli.py` is 1599 lines).
   `DRIVERS` gains them. `hive/launch.py` `expand_command`: `{session_id}` placeholder,
   `driver.unattended_args`, `driver.session_args`. `hive/trust.py`: Claude only, called by
   `drivers/claude.py`; Codex trust pre-seed via `-c` (no file write); OpenCode: none.
-  `hive/inspect.py`: pattern per driver. `hive/workers.py` is not edited: `cmd_spawn` already
+  `hive/inspect.py`: pattern per driver. `hive/workers.py` is not edited (superseded by the R1 child plan): `cmd_spawn` already
   calls `ensure_trust` and `preflight`, which call the driver.
 
 ### R5 multi-node
@@ -509,7 +509,7 @@ the squash-merge.
   `tests/test_tmux.py`, `tests/test_cli.py`, `docs/commands.md`.
 - Deps: R1a
 - Stages: execute
-- Status: execute
+- Status: done
 - Lead: executor
 - Accept: `set_indices: count=3 minus 1 -> indices=[2,3], count line removed, verify ok`;
   `set_indices_collapses: indices=[2,3] plus 1 -> count=3`; `parse_indices_and_count_exclusive ->
@@ -524,18 +524,21 @@ the squash-merge.
   recipe; `reconcile` keeps the hole; `spawn -n 1` refills it.
 - Artifacts: ->
 
-### R1: Drivers for Claude Code, OpenCode and Codex CLI
+### R1: Drivers for Claude Code, OpenCode v2 and Codex (gated)
 - Goal: `system` selects a driver per agent, launcher and queen (D7, D15); done when a worker of
   each system starts in the test hive with correct unattended and trust handling.
-  Codex removed from this release by user decision 2026-10-27; OpenCode gated on the external-device remote spike.
+  Codex and OpenCode both ship only if their external-device remote gates (G2, G1 in the child plan) pass; user decision 2026-10-27.
 - Owns: `hive/drivers/*`, `hive/launch.py`, `hive/tmux.py` (`setup_pane` stores
   `@hive_session`), `hive/trust.py`, `hive/inspect.py`, `hive/config.example.toml`,
   `tests/test_drivers.py` (the `@hive_session` tests stub `tmux`), `tests/test_trust.py`,
   `tests/test_inspect.py`, `tests/test_args.py`, `docs/systems/claude.md`,
-  `docs/systems/opencode.md`, `docs/systems/codex.md`.
-- Deps: R1a
+  `docs/systems/opencode.md`, `docs/systems/codex.md`, `hive/workers.py` (cmd_list, cmd_spawn,
+  parse_env_args), `hive/configedit.py` (append_agent system), `hive/launchers.py`,
+  `hive/config.py` (check_env, parse_queen, parse_agents default command), `tests/test_cli.py`,
+  `tests/test_configedit.py`, `tests/test_config.py`.
+- Deps: R1a, R2
 - Stages: plan, execute
-- Status: plan
+- Status: execute
 - Lead: executor (child plan by planner first: the spike list of D15 and the per-driver launch
   templates verified against the local binaries)
 - Accept: spike report first (fresh config dir launch per system in the test hive: dialogs seen,
@@ -550,7 +553,7 @@ the squash-merge.
   `inspect_pattern_per_driver`. Validate: spawn one worker per system with `config_dir` (or the
   driver's config-dir equivalent) under the profile; `capture-pane` shows each tool's prompt;
   `list` shows `waiting=` for a blocking dialog; `down`.
-- Artifacts: plan-hive-queen-2.0-R1.md
+- Artifacts: .supervisor/working/plans/plan-r1-drivers.md
 
 ### R5: Multi-node control over ssh
 - Goal: `hive --node NAME <cmd>` proxies to a remote hive (D8) and a node runs queen-less
@@ -711,6 +714,13 @@ the squash-merge.
 - 2026-10-27 decision: user: a system ships in this release only if a user on another device can reach its sessions without tunnel-building ("the entire point of hive queen is to make remote sessions available on other devices"); Codex is deferred to the roadmap until it offers remote control on Linux; OpenCode v2 is the approved generation and ships only if the R1 spike proves external-device remote access without tunnels; otherwise R1 reduces to the Claude reference driver on the driver seam and R6/R8b shrink accordingly
 - 2026-10-27 decision: user: OpenCode service-password exposure deferred (machine is secure), no action
 - 2026-10-27 R1a: done; cli.py split into 11 modules plus hive/drivers (claude driver, `system` key at four levels, claude only), cli.py 112 lines, 422 tests green on 3.11/3.12/3.13, test-profile recipe identical to main and production panes unchanged; landed on main as 78e5215 (squash); deviations from the plan's module map accepted by critic (ConfigError in util; edit_config/check_config_writable/expand_config_dir in config; expand_pane in launch; depth_int in roots; BROKEN_CONFIG_NOTE in lifecycle; golden help per Python version); deferred to R1: spawn copying a launcher's `system` (no agent-launcher link), Claude-specific preflight/env texts
+- 2026-10-27 R2: done; `[[agents]] indices` (exclusive with count), `hive stop TYPE --index N` / `hive stop NAME...`, spawn fills lowest free indices, list shows `indices=` when sparse; pytest 454 passed; test-profile out-of-order stop/refill validated, production panes unchanged; landed on main as 24f2b4f (squash); deviation: agent_indices lives in reconcile.py (import cycle); deferred: docs/configuration.md indices row (R8b), config.example.toml indices mention (R1), multi-line indices array editing (rejected, safe-failing), memory entry 2026-10-22-instance-naming-and-queen-rename partly superseded by D6 (curator at close-out)
+- 2026-10-27 R1 (planner): child plan written at .supervisor/working/plans/plan-r1-drivers.md, spikes run for Claude, OpenCode and Codex, gates G1 (OpenCode, docs pass) and G2 (Codex, daemon pass) await user live tests; deferred: OpenCode phone test and Codex app confirmation to the user (Slice 3); Claude RC-consent and resume+RC reattach untested (R4)
+- 2026-10-27 amend D15: Codex back in this release under gate G2 (user showed `codex remote-control` + pair working on swarm, 2026-10-27; research claim "Linux not a listed host" superseded; roadmap R9 returns to R1 pending G2); OpenCode = shared service + API-created session + `--auto` + `pair --remote`, `min_version` from G1, `--standalone` dropped; Codex = default CODEX_HOME, daemon ensured at launch, `-c` hooks + `--dangerously-bypass-hook-trust`, SessionStart session id, trust in config.toml, `/rename` documented not automated
+- 2026-10-27 amend D16 (R3 interface): OpenCode poll `GET /api/session/active` + SSE `/api/event` (basic auth `opencode:<password>`; no `/session/status`); Codex hooks SessionStart/Stop/SessionEnd/PermissionRequest via `-c`; Codex `notify` rejected as done signal
+- 2026-10-27 amend D18 (R6): OpenCode v2 key is `permissions` (plural, `{action,resource,effect}`); OpenCode queen must attach to the shared service; Codex queen runs in the default CODEX_HOME; Codex queen spike restored
+- 2026-10-27 risk: a Codex daemon started by `hive up` under systemd dies with the hive service; `up` re-ensures it
+- 2026-10-27 R1 (supervisor): Slices 1, 2, 4 dispatched to executor on feat/r1-claude-driver; Slices 5 (OpenCode) and 6 (Codex) blocked on user gate tests G1/G2
 
 ## Todo
 
