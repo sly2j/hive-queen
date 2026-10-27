@@ -538,7 +538,7 @@ the squash-merge.
   `tests/test_configedit.py`, `tests/test_config.py`.
 - Deps: R1a, R2
 - Stages: plan, execute
-- Status: execute
+- Status: done
 - Lead: executor (child plan by planner first: the spike list of D15 and the per-driver launch
   templates verified against the local binaries)
 - Accept: spike report first (fresh config dir launch per system in the test hive: dialogs seen,
@@ -592,7 +592,7 @@ the squash-merge.
   `tests/test_driver_opencode.py`, `tests/test_driver_codex.py`.
 - Deps: R1
 - Stages: plan, execute
-- Status: execute
+- Status: done
 - Lead: executor (child plan by planner: the status file schema, the per-event mapping per
   driver from research A3, the OpenCode poll)
 - Accept: `status_hook_writes_file: Claude Stop JSON on stdin -> state done, session_id set`;
@@ -747,6 +747,10 @@ the squash-merge.
 - 2026-10-27 R1 Slice 6 (executor): swarm live check: `-c` overrides and `--dangerously-bypass-hook-trust` force Codex 0.164.0 into embedded mode (TUI warning: "Running without the shared background server: command-line configuration overrides (-c, --enable, --disable, or --search) requires embedded mode"), so hook-injected panes are not reachable from the Codex app; D-R1.3 Codex hook injection is wrong
 - 2026-10-27 decision (supervisor, under the user's app-reachability rule): Codex workers launch with no hook injection (hook_args = []); done detection for Codex uses the tmux fallback; Codex has no session id, so `stop --keep-session` on a Codex pane exits 1 with a clear message and Codex resume is documented as manual (`codex resume`) for 2.0; R3 Slice 4 (Codex hook mapping) dropped; roadmap: Codex hooks via a config layer the daemon loads (project `.codex` hooks / `[hooks]` in config.toml) and Codex session lookup from ~/.codex/state_5.sqlite for resume
 - 2026-10-27 decision (supervisor): R6 unit C (Codex queen) proceeds spike-first using project-level hooks config inside the hive-owned queen dir (no `-c`, no bypass flag; one-time interactive hook approval); if that also forces embedded mode or needs per-launch approval, the Codex queen is deferred and Codex ships worker-only (earlier default, user did not object)
+- 2026-10-27 R1 Slice 6 (executor): done; codex driver ships hook-less per option A (`-c`/`--dangerously-bypass-hook-trust` force embedded mode on 0.164.0), tmux-fallback state, `stop --keep-session` refused for codex, daemon ensured at launch and resume, trust seeded append-only in config.toml (spike: seeded entry suppresses the prompt; non-git dirs never prompt); swarm check: `system=codex`, shared-server footer, no embedded-mode warning, production panes unchanged; landed on main as 3583d92 (squash); pytest 667 passed; deferred: Codex session capture and resume (roadmap, state_5.sqlite), app-side visibility confirmation to the user
+- 2026-10-27 R1: done (Claude + Codex drivers landed; Slice 5 OpenCode dropped by G1; Slice 7 swarm check covered by the Slice 6 live run)
+- 2026-10-27 R3: done (Claude path landed; Slice 3 OpenCode dropped by G1; Slice 4 Codex hooks dropped, embedded mode)
+- 2026-10-27 R6 unit C and R8b dispatched (feat/r6-codex-queen spike-first; docs/r8b-polish)
 
 ## Todo
 
@@ -754,9 +758,9 @@ the squash-merge.
 - [ ] R8a docs skeleton landed on main
 - [ ] R1a cli split landed on main
 - [ ] R2 per-instance removal landed
-- [ ] R1 child plan written, spike run, drivers landed
+- [x] R1 child plan written, spike run, drivers landed
 - [ ] R5 multi-node landed, swarm test hive validated
-- [ ] R3 child plan written, done detection landed
+- [x] R3 child plan written, done detection landed
 - [x] R4 resume landed
 - [ ] R6 child plan written, spikes passed (or blocked with Q2 answered), queen per system landed
 - [ ] R8b docs polish landed

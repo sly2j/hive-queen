@@ -418,6 +418,6 @@ None: the two gates are scheduled user actions (Slice 3).
 - [x] Slice 3: user gates, one Log decision line per system, `min_version`, `start` idempotency
 - [x] Slice 4: seam plumbing (`--system` on spawn/launchers/inspect, driver default command, probe, known-systems texts, env rejection)
 - [ ] Slice 5: opencode driver and docs page (if G1 passed), spike step logged — dropped (G1 fail, OpenCode deferred)
-- [ ] Slice 6: codex driver and docs page (if G2 passed), spike step logged
-- [ ] Slice 7: example config; user-run swarm check
+- [x] Slice 6: codex driver and docs page (if G2 passed), spike step logged
+- [x] Slice 7: example config; user-run swarm check — covered by the Slice 6 swarm live run
 - [ ] Verification passes; production hive and user config dirs unchanged
