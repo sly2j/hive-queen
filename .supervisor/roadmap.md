@@ -9,8 +9,8 @@ Background: no isolated instance exists. Needed: own config dir, tmux socket, pr
 
 ## R1 Driver abstraction for agent systems
 Status: planned. Depends on: none; prerequisite for R3, R4, R6.
-Decisions: .supervisor/memory/decisions/2026-10-27-ship-only-systems-with-tunnel-free-remote.md
-Background: hive is Claude-specific. Needed per system (Claude, OpenCode v2 if its spike proves tunnel-free remote access; Codex is not in this release): launch command, remote-control equivalent, config-dir/trust/permission mechanics, instruction-file and guard equivalents. Likely requires splitting hive/cli.py (1566 lines) so later packages can proceed in parallel.
+Decisions: .supervisor/memory/decisions/2026-10-27-ship-only-systems-with-tunnel-free-remote-2.md
+Background: hive is Claude-specific. Needed per system (Claude and Codex ship; OpenCode is deferred): launch command, remote-control equivalent, config-dir/trust/permission mechanics, instruction-file and guard equivalents. Likely requires splitting hive/cli.py (1566 lines) so later packages can proceed in parallel.
 
 ## R2 Per-instance removal
 Status: planned. Depends on: none (independent).
@@ -47,12 +47,17 @@ Status: planned. Depends on: features; can be drafted in parallel.
 Decisions: .supervisor/memory/decisions/2026-10-27-docs-short-readme-and-plain-markdown-docs.md
 Background: no new-user docs. Needed: short README, docs/ split by topic, getting-started path, per-system guides, multi-node guide.
 
-## R9 Codex driver (when Codex remote control is available on Linux)
+## R9 OpenCode driver and queen (deferred: external-device relay failed G1 on 2026-10-27; retry off the work network)
 Status: deferred. Depends on: R1.
-Decisions: .supervisor/memory/decisions/2026-10-27-ship-only-systems-with-tunnel-free-remote.md
-Background: Codex is excluded until it offers remote sessions reachable from other devices on Linux.
+Decisions: .supervisor/memory/decisions/2026-10-27-opencode-deferred-from-2-0.md, .supervisor/memory/decisions/2026-10-27-ship-only-systems-with-tunnel-free-remote-2.md
+Background: OpenCode is excluded from 2.0 until `opencode pair --remote` or another tunnel-free path reaches sessions from an external device.
 
 ## R10 pi driver
 Status: deferred. Depends on: R1.
-Decisions: .supervisor/memory/decisions/2026-10-27-ship-only-systems-with-tunnel-free-remote.md
+Decisions: .supervisor/memory/decisions/2026-10-27-ship-only-systems-with-tunnel-free-remote-2.md
 Background: ships only if it shows a tunnel-free remote-access story.
+
+## R11 Codex rules-based prompts
+Status: deferred. Depends on: R6.
+Decisions: .supervisor/memory/decisions/2026-10-27-codex-ships-as-worker-and-queen.md
+Background: Codex queen uses deny-with-message (R6 D-R6.11). Needed: `-a on-request` plus `.codex/rules` replacing that deny-with-message.

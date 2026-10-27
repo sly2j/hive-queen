@@ -408,13 +408,16 @@ None: the two gates are scheduled user actions (Slice 3).
 
 ## Log
 
+- 2026-10-27 decision: opencode gate fail (G1: `opencode pair --remote` relay did not work; user hypothesis: blocked on the work network); OpenCode deferred to the roadmap for this release; R1 Slice 5, R3 Slice 3 and R6 unit O dropped; source: user
+- 2026-10-27 decision: codex gate pass (G2: hive-launched codex pane on swarm visible and drivable from the paired app); pairing persisted across a daemon restart, only `codex remote-control start` was needed, no re-pair; `start` idempotency on a running daemon unverified, so hive checks for a running daemon before starting one; source: user
+
 ## Todo
 
 - [x] Slice 1: claude driver methods, session id in `setup_pane`, `@hive_session`, waiting kinds
 - [x] Slice 2: `hive list` `system=`/`waiting=<kind>`, `docs/systems/claude.md`, test-hive check
-- [ ] Slice 3: user gates, one Log decision line per system, `min_version`, `start` idempotency
+- [x] Slice 3: user gates, one Log decision line per system, `min_version`, `start` idempotency
 - [x] Slice 4: seam plumbing (`--system` on spawn/launchers/inspect, driver default command, probe, known-systems texts, env rejection)
-- [ ] Slice 5: opencode driver and docs page (if G1 passed), spike step logged
+- [ ] Slice 5: opencode driver and docs page (if G1 passed), spike step logged — dropped (G1 fail, OpenCode deferred)
 - [ ] Slice 6: codex driver and docs page (if G2 passed), spike step logged
 - [ ] Slice 7: example config; user-run swarm check
 - [ ] Verification passes; production hive and user config dirs unchanged
