@@ -635,7 +635,7 @@ the squash-merge.
   (two materialize tests move to tests/test_queen.py) and `tests/test_split.py`.
 - Deps: R1, R3, R5
 - Stages: plan, execute
-- Status: execute
+- Status: done
 - Lead: executor (child plan by planner: the spike protocol of D18 first)
 - Accept: spike first (Codex queen: allow `hive list`, deny `hive list; ls`, deny every Claude
   `ask` command; outcome recorded in the child plan's Log), then: `guard_core` tests pass for
@@ -756,6 +756,10 @@ the squash-merge.
 - 2026-10-27 decision: user: allow Codex to persist the queen's folder and hook trust in ~/.codex/config.toml (one interactive "Trust all"; re-trust after guard changes is an accepted upgrade step); Codex queen ships; unit C resumed on feat/r6-codex-queen
 - 2026-10-27 R8b: done; README + 13 docs pages audited against `hive --help` 1.44, global options/nodes/list-status fields/config keys (indices, enabled, system) added, versions stated, OpenCode and pi deferred with reason, Claude resume section, link test keeps only docs/upgrade.md pending; critic codex round 1 REVISE, round 2 PASS; pytest 667 passed; landed on main as adaa5f0 (squash); deferred: docs/systems/codex.md:3,77 "no Codex queen" lines and docs/queen.md Codex row to R6 unit C; claude driver `versions` tuple (2.1.312) optional in R6 unit C; R7 install-URL/package swaps: README.md:5 and quick-start install line, docs/getting-started.md install block (2 lines) and `uv tool uninstall hive`, docs/development.md clone URL and `uv tool upgrade hive`
 - 2026-10-27 convention candidate (from R8b writer, for curator at close-out): docs quote hive's exact output and error strings in backticks instead of paraphrasing them; affects docs/ and README.md
+- 2026-10-27 R6 unit C (executor): done; spike on swarm Codex 0.164.0 passed: project `.codex/hooks.json` keeps the pane on the daemon, guard denied `touch` and `hive down` (run-by-hand message), folder + "Trust all" persisted in ~/.codex/config.toml across relaunches, re-trust only when the hooks.json entry hash changes; queen shell env set via `[shell_environment_policy.set]` (daemon runs commands); pytest 714 passed; critic codex round 2 PASS; landed on main as f8d6a87 (squash); deferred: none
+- 2026-10-27 amend D-R6.9/D-R6.10 (R6 child plan): no `-c`; guard and feature switches live in `<queen>/.codex/{hooks.json,config.toml}`; a queen dir with `.codex/` shows the folder-trust prompt; folder and hook trust are one-time interactive approvals stored by Codex in ~/.codex/config.toml
+- 2026-10-27 R6: done (Claude and Codex queens; unit O OpenCode dropped by G1)
+- 2026-10-27 R7 (supervisor): release preparation dispatched to executor on release/2.0; tag, push and GitHub rename wait for the user
 
 ## Todo
 
@@ -767,7 +771,7 @@ the squash-merge.
 - [ ] R5 multi-node landed, swarm test hive validated
 - [x] R3 child plan written, done detection landed
 - [x] R4 resume landed
-- [ ] R6 child plan written, spikes passed (or blocked with Q2 answered), queen per system landed
+- [x] R6 child plan written, spikes passed (or blocked with Q2 answered), queen per system landed
 - [x] R8b docs polish landed
 - [ ] R7 release: VERSION 2.0, tag v2.0, rename, upgrade note, push (user confirms tag and push)
 - [ ] Verification section passes; production hives unchanged on both machines

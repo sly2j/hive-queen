@@ -373,6 +373,8 @@ whose pass and fail paths are decided (D-R6.10).
 - 2026-10-27 R6 unit C (executor): spike on swarm Codex 0.164.0: project `.codex/hooks.json` in the queen dir keeps the pane on the shared daemon (no embedded-mode warning, `-a never -s danger-full-access` fine) but needs folder trust (`[projects]`) and hook trust stored as `[hooks.state."<key>"] trusted_hash` in the user's ~/.codex/config.toml, re-requested when the hook hash changes; stopped before hook trust per the safety contract, user config restored, panes unchanged on both machines
 - 2026-10-27 amend D-R6.10 (R6 child plan): a non-git queen dir with `.codex/` does show Codex's folder-trust prompt; "no trust prompt, hive seeds nothing" is wrong; seed_trust for the queen dir is acceptable
 - 2026-10-27 decision: user: allow Codex to persist the queen's folder and hook trust in ~/.codex/config.toml (one interactive "Trust all"; re-trust after guard changes is an accepted upgrade step); Codex queen ships; unit C resumed on feat/r6-codex-queen
+- 2026-10-27 R6 unit C (executor): done; spike on swarm Codex 0.164.0 passed: project `.codex/hooks.json` keeps the pane on the daemon, guard denied `touch` and `hive down` (run-by-hand message), folder + "Trust all" persisted in ~/.codex/config.toml across relaunches, re-trust only when the hooks.json entry hash changes; queen shell env set via `[shell_environment_policy.set]` (daemon runs commands); pytest 714 passed; critic codex round 2 PASS; landed on main as f8d6a87 (squash); deferred: none
+- 2026-10-27 amend D-R6.9/D-R6.10 (R6 child plan): no `-c`; guard and feature switches live in `<queen>/.codex/{hooks.json,config.toml}`; a queen dir with `.codex/` shows the folder-trust prompt; folder and hook trust are one-time interactive approvals stored by Codex in ~/.codex/config.toml
 
 ## Todo
 
@@ -383,6 +385,6 @@ whose pass and fail paths are decided (D-R6.10).
       squash-land Slices 1-3
 - [ ] Unit O: spike (criteria D-R6.10) recorded; on pass `opencode.json`, plugin, adapter,
       driver flip, tests, docs; on fail limitation line and `Amend parent:` roadmap — dropped (G1 fail, OpenCode deferred)
-- [ ] Unit C: spike recorded; on pass adapter, `queen_extras`, driver flip, tests, docs; on
+- [x] Unit C: spike recorded; on pass adapter, `queen_extras`, driver flip, tests, docs; on
       fail limitation line and `Amend parent:` roadmap
 - [ ] Verification passes; production hive and user config dirs unchanged
