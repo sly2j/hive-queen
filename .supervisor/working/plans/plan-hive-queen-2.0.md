@@ -443,7 +443,7 @@ the squash-merge.
   `docs/test-profile.md`.
 - Deps: none
 - Stages: execute
-- Status: execute
+- Status: done
 - Lead: executor
 - Accept: `test_profile_paths: --profile t -> <xdg>/hive/profiles/t/config.toml and .lock`;
   `test_profile_env_vs_option: HIVE_PROFILE=a plus --profile b -> b`; `test_profile_defaults:
@@ -473,7 +473,7 @@ the squash-merge.
   and macOS), `troubleshooting.md`, `development.md`.
 - Deps: none
 - Stages: write
-- Status: write
+- Status: done
 - Lead: writer
 - Accept: `tests/test_docs_links.py` checks relative links and anchors in README and `docs/`,
   with the D11 feature pages allowed to be absent until their package lands; the current README
@@ -527,6 +527,7 @@ the squash-merge.
 ### R1: Drivers for Claude Code, OpenCode and Codex CLI
 - Goal: `system` selects a driver per agent, launcher and queen (D7, D15); done when a worker of
   each system starts in the test hive with correct unattended and trust handling.
+  Codex removed from this release by user decision 2026-10-27; OpenCode gated on the external-device remote spike.
 - Owns: `hive/drivers/*`, `hive/launch.py`, `hive/tmux.py` (`setup_pane` stores
   `@hive_session`), `hive/trust.py`, `hive/inspect.py`, `hive/config.example.toml`,
   `tests/test_drivers.py` (the `@hive_session` tests stub `tmux`), `tests/test_trust.py`,
@@ -701,6 +702,14 @@ the squash-merge.
 - 2026-10-27 decision: the launch session id lives in the tmux pane option @hive_session; sessions.json records it only on stop --keep-session; source: lead
 - 2026-10-27 decision: wave order R0+R8a, R1a (R8a may overlap), R2+R1, R5+R3, R4+R6, R8b, R7 with disjoint Owns per wave; source: lead
 - 2026-10-27 decision: no `shell` driver and no `hive nodes add`: the fake worker command covers test hives, nodes are hand-edited in config.toml (scope-critic S7, S8); source: lead
+- 2026-10-27 R8a: done; README 72 lines, 10 docs/ pages, tests/test_docs_links.py green, landed on main as 23f87a0 (squash); deferred: docs/commands.md and docs/queen.md created with today's content against the letter of D11 (supervisor confirmed keep), placeholder pages for unshipped features not created (plan does not require them)
+- 2026-10-27 R0: done on feat/r0-test-profile, landed on main as c5f8de6 (squash), pytest 413 passed, test-hive recipe passed here and on swarm (D9 dev clone at /home/sjoosten/dev/hive-queen); deferred: C3 legacy-queen stop rejected as legacy-only; leftovers kept for reuse: ~/.config/hive/profiles/test/ on both machines
+- 2026-10-27 decision: docs/commands.md and docs/queen.md exist from R8a with today's content; R2 and R6 edit those pages rather than create them (supervisor; relaxes the letter of D11)
+- 2026-10-27 decision: no PyPI publication at 2.0, git-URL installs only; PyPI goes to the roadmap (supervisor default answering Q1; user did not object)
+- 2026-10-27 decision: if an R6 queen-port spike fails for a system, that system ships worker-only with the limitation documented; the release is not held (supervisor default answering Q2; user did not object)
+- 2026-10-27 note: `gh` is not installed on this machine; R7's `gh repo rename` needs gh installed or a manual rename in the GitHub UI; CI results are not checkable from the shell
+- 2026-10-27 decision: user: a system ships in this release only if a user on another device can reach its sessions without tunnel-building ("the entire point of hive queen is to make remote sessions available on other devices"); Codex is deferred to the roadmap until it offers remote control on Linux; OpenCode v2 is the approved generation and ships only if the R1 spike proves external-device remote access without tunnels; otherwise R1 reduces to the Claude reference driver on the driver seam and R6/R8b shrink accordingly
+- 2026-10-27 decision: user: OpenCode service-password exposure deferred (machine is secure), no action
 
 ## Todo
 

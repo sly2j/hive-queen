@@ -1,6 +1,6 @@
 # Roadmap
 
-Ordered; each item lists what it depends on. All items are planned.
+Ordered; each item lists what it depends on. All items are planned unless marked deferred.
 
 ## R0 Test hive profile
 Status: planned. Depends on: none; prerequisite for live validation of everything else.
@@ -9,8 +9,8 @@ Background: no isolated instance exists. Needed: own config dir, tmux socket, pr
 
 ## R1 Driver abstraction for agent systems
 Status: planned. Depends on: none; prerequisite for R3, R4, R6.
-Decisions: .supervisor/memory/decisions/2026-10-27-worker-systems-codex-opencode-plus-proven-remote.md
-Background: hive is Claude-specific. Needed per system (Claude, Codex, OpenCode, others research proves viable): launch command, remote-control equivalent, config-dir/trust/permission mechanics, instruction-file and guard equivalents. Likely requires splitting hive/cli.py (1566 lines) so later packages can proceed in parallel.
+Decisions: .supervisor/memory/decisions/2026-10-27-ship-only-systems-with-tunnel-free-remote.md
+Background: hive is Claude-specific. Needed per system (Claude, OpenCode v2 if its spike proves tunnel-free remote access; Codex is not in this release): launch command, remote-control equivalent, config-dir/trust/permission mechanics, instruction-file and guard equivalents. Likely requires splitting hive/cli.py (1566 lines) so later packages can proceed in parallel.
 
 ## R2 Per-instance removal
 Status: planned. Depends on: none (independent).
@@ -46,3 +46,13 @@ Background: repo and package are named `hive`. Needed: repo `hive-queen`, packag
 Status: planned. Depends on: features; can be drafted in parallel.
 Decisions: .supervisor/memory/decisions/2026-10-27-docs-short-readme-and-plain-markdown-docs.md
 Background: no new-user docs. Needed: short README, docs/ split by topic, getting-started path, per-system guides, multi-node guide.
+
+## R9 Codex driver (when Codex remote control is available on Linux)
+Status: deferred. Depends on: R1.
+Decisions: .supervisor/memory/decisions/2026-10-27-ship-only-systems-with-tunnel-free-remote.md
+Background: Codex is excluded until it offers remote sessions reachable from other devices on Linux.
+
+## R10 pi driver
+Status: deferred. Depends on: R1.
+Decisions: .supervisor/memory/decisions/2026-10-27-ship-only-systems-with-tunnel-free-remote.md
+Background: ships only if it shows a tunnel-free remote-access story.
