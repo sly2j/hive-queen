@@ -6,6 +6,13 @@
 branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 [ "$branch" = "main" ] || exit 0
 
+# Store-only commits (every staged path under .supervisor/) do not bump VERSION.
+# An empty staged set is not store-only, so it keeps the bump.
+staged=$(git diff --cached --name-only --no-renames)
+if [ -n "$staged" ] && [ -z "$(printf '%s\n' "$staged" | grep -v '^\.supervisor/')" ]; then
+    exit 0
+fi
+
 # Root commit: nothing to bump.
 git rev-parse --verify --quiet HEAD >/dev/null || exit 0
 

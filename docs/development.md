@@ -24,7 +24,7 @@ uv tool upgrade hive-queen   # or: uv tool install --reinstall .
 
 ## Versioning
 
-The version is in `VERSION`, scheme `MAJOR.MINOR`. A pre-commit hook bumps the minor on every commit on `main`, and does nothing on other branches; a release sets the major by hand and is tagged. Enable the hook once per clone:
+The version is in `VERSION`, scheme `MAJOR.MINOR`. A pre-commit hook bumps the minor on every commit on `main`, and does nothing on other branches; a release sets the major by hand and is tagged. Commits that touch only `.supervisor/` do not bump VERSION. Enable the hook once per clone:
 
 ```sh
 git config core.hooksPath .githooks
