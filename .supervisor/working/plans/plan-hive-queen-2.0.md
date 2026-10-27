@@ -490,7 +490,7 @@ the squash-merge.
   `pyproject.toml` (the module map is documented by R8b).
 - Deps: R0
 - Stages: execute
-- Status: execute
+- Status: done
 - Lead: executor
 - Accept: all existing tests green; `test_cli_help_unchanged`; `test_no_import_cycles: import
   every hive.* module in isolation -> ok`; `test_util_imports_nothing_from_hive`;
@@ -710,6 +710,7 @@ the squash-merge.
 - 2026-10-27 note: `gh` is not installed on this machine; R7's `gh repo rename` needs gh installed or a manual rename in the GitHub UI; CI results are not checkable from the shell
 - 2026-10-27 decision: user: a system ships in this release only if a user on another device can reach its sessions without tunnel-building ("the entire point of hive queen is to make remote sessions available on other devices"); Codex is deferred to the roadmap until it offers remote control on Linux; OpenCode v2 is the approved generation and ships only if the R1 spike proves external-device remote access without tunnels; otherwise R1 reduces to the Claude reference driver on the driver seam and R6/R8b shrink accordingly
 - 2026-10-27 decision: user: OpenCode service-password exposure deferred (machine is secure), no action
+- 2026-10-27 R1a: done; cli.py split into 11 modules plus hive/drivers (claude driver, `system` key at four levels, claude only), cli.py 112 lines, 422 tests green on 3.11/3.12/3.13, test-profile recipe identical to main and production panes unchanged; landed on main as 78e5215 (squash); deviations from the plan's module map accepted by critic (ConfigError in util; edit_config/check_config_writable/expand_config_dir in config; expand_pane in launch; depth_int in roots; BROKEN_CONFIG_NOTE in lifecycle; golden help per Python version); deferred to R1: spawn copying a launcher's `system` (no agent-launcher link), Claude-specific preflight/env texts
 
 ## Todo
 
