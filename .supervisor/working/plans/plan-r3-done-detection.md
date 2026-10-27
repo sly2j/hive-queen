@@ -303,6 +303,6 @@ a "stop idle" command, queen per system (R6), pi.
       `hook_args` events, `list`/`status` fields, fake worker, unit tests, test-profile sequence
 - [x] Slice 2: `docs/idle-detection.md`, queen bullet, real-Claude smoke
 - [ ] Slice 3: OpenCode `poll_state` (if R1 Slice 5 landed)
-- [ ] Slice 4: Codex `hook_args` events (if R1 Slice 6 landed)
+- [ ] Slice 4: Codex `hook_args` events (if R1 Slice 6 landed) — dropped (Codex hooks force embedded mode; see parent Log 2026-10-27)
 - [ ] Q1 answered; token round run if yes
 - [ ] Verification passes; production hive unchanged
