@@ -1,54 +1,45 @@
-#!/usr/bin/env python3
-"""PreToolUse guard for the hive queen. Managed by hive; do not edit.
+"""System-neutral guard logic for the hive queen. Managed by hive; do not edit.
 
-Only the QUEEN_TOOLS are allowed; any other tool (WebFetch, Agent, mcp__*, ...) is denied. Bash
-and Monitor: only a single `hive ...` command (optionally `hive --node NAME ...`, checked like the
-command it runs remotely), no chaining, redirection or substitution, and no
-argument under a secrets/private path. Of those, `hive spawn --command X` (also `--command=X`
-and argparse abbreviations such as `--comm`) runs without a prompt only when X is a command
-string from ../config.toml ([defaults] command or an [[agents]] command). Likewise each
-`--arg X` (same forms) must be an args string from [defaults], [queen] or an [[agents]] entry. For any other
---command or --arg, for any spawn `--env` or `--trust` (same abbreviations), for `hive roots add PATH`,
-for `hive launchers add` and for `hive down`/`restart`, the guard answers "ask" so the user confirms (`hive stop` needs no
-prompt). Read, Grep, Glob, Edit, Write, NotebookEdit: only paths inside the queen dir
-($CLAUDE_PROJECT_DIR), never under a secrets/private path, no `..` in glob patterns, and no
-writes into its .claude dir, .mcp.json, .claude.json or CLAUDE.md. AskUserQuestion is allowed
-as is. Exit 2 blocks the tool call
-(deny wins over ask); "ask" is JSON on stdout with exit 0; any error blocks (fail closed).
+Stdlib only, no hive import. Each system's adapter (hooks/guard.py) maps a tool call to
+check_bash / check_file_tool and turns the Verdict into that system's protocol. A Verdict is
+(decision, reason): decision is allow, ask or deny; the reason is "" for allow. A deny anywhere
+wins over an ask (check_bash asks only after every deny check has passed). Spawn asks cover
+--command, --arg, --system (unless named in config.toml), --env and --trust.
 """
 
-import json
 import os
 import re
 import shlex
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 BASH_REASON = "guard: only `hive ...` commands are allowed in the queen; use hive subcommands"
 CHAIN = (";", "&", "|", "`", "$(", ">", "<", "\n", "\r")
-FILE_TOOLS = {"Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit"}
-SHELL_TOOLS = {"Bash", "Monitor"}
-WRITE_TOOLS = {"Edit", "Write", "NotebookEdit"}
 GLOB_CHARS = set("*?[{")
-# Asks the user a question; no input the guard needs to check.
-DIALOG_TOOLS = {"AskUserQuestion"}
-QUEEN_TOOLS = {"Bash", "Monitor", "Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit"} | DIALOG_TOOLS
-PROTECTED_NAMES = (".claude", ".mcp.json", ".claude.json", "CLAUDE.md")
 PRIVATE_PARTS = {"secrets", "private"}
 NODE_RE = re.compile(r"[a-z0-9][a-z0-9-]*")  # hive's [[nodes]] name rule
 
 
+class Verdict(NamedTuple):
+    decision: str  # allow | ask | deny
+    reason: str
+
+
+class Deny(Exception):
+    pass
+
+
+class Ask(Exception):
+    pass
+
+
 def block(reason):
-    print(reason, file=sys.stderr)
-    sys.exit(2)
+    raise Deny(reason)
 
 
 def ask(reason):
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": "ask",
-        "permissionDecisionReason": reason}}))
-    sys.exit(0)
+    raise Ask(reason)
 
 
 def config_commands(qdir):
@@ -73,6 +64,23 @@ def config_args(qdir):
         lists = [(cfg.get("defaults") or {}).get("args"), (cfg.get("queen") or {}).get("args")]
         lists += [a.get("args") for a in cfg.get("agents") or [] if isinstance(a, dict)]
         return {x for lst in lists if isinstance(lst, list) for x in lst if isinstance(x, str)}
+    except Exception:
+        return set()
+
+
+def config_systems(qdir):
+    """System names in ../config.toml ([defaults], [queen], [[agents]], [[launchers]]).
+
+    Empty when it cannot be read or parsed.
+    """
+    try:
+        import tomllib
+        with open(qdir.parent / "config.toml", "rb") as f:
+            cfg = tomllib.load(f)
+        found = [(cfg.get("defaults") or {}).get("system"), (cfg.get("queen") or {}).get("system")]
+        for key in ("agents", "launchers"):
+            found += [a.get("system") for a in cfg.get(key) or [] if isinstance(a, dict)]
+        return {s for s in found if isinstance(s, str)}
     except Exception:
         return set()
 
@@ -102,7 +110,7 @@ def has_flag(args, flag):
 
 
 SPAWN_VALUE_OPTIONS = ("--type", "--command", "--config-dir", "--launcher", "--sandbox", "--env",
-                       "--arg")
+                       "--arg", "--system", "--resume")
 
 
 def spawn_target(args):
@@ -140,7 +148,7 @@ def resolve(text, base):
     return (p if p.is_absolute() else base / p).resolve()
 
 
-def check_bash(command, qdir):
+def _check_bash(command, qdir):
     if not isinstance(command, str):
         block("guard: shell tool input has no command string")
     if any(c in command for c in CHAIN) or "$'" in command or '$"' in command:
@@ -184,6 +192,9 @@ def check_bash(command, qdir):
         known_args = config_args(qdir)
         reasons += [f"hive spawn --arg is not an arg from config.toml: {a}"
                     for a in spawn_options(tokens[2:], "--arg") if a not in known_args]
+        known_systems = config_systems(qdir)
+        reasons += [f"hive spawn --system starts a different agent system: {s}"
+                    for s in spawn_options(tokens[2:], "--system") if s not in known_systems]
         env = spawn_options(tokens[2:], "--env")
         if env:
             reasons.append(f"hive spawn --env sets environment for the new agent: {' '.join(env)}")
@@ -206,7 +217,7 @@ def check_bash(command, qdir):
             "approve to run it")
 
 
-def check_path(text, qdir, write):
+def _check_path(text, qdir, write, protected):
     if not isinstance(text, str) or not text:
         block("guard: missing path")
     if is_private(os.path.expanduser(text)):
@@ -217,7 +228,7 @@ def check_path(text, qdir, write):
     if path != qdir and qdir not in path.parents:
         block(f"guard: {text} is outside the queen dir {qdir}; the queen only reads its own dir")
     if write:
-        for name in PROTECTED_NAMES:
+        for name in protected:
             if path == qdir / name or qdir / name in path.parents:
                 block(f"guard: {text} is {name} in the queen dir, which hive manages")
 
@@ -230,14 +241,14 @@ def check_glob_parts(pattern, what):
             block(f"guard: {what} part {part!r} mixes {{ or [ with a dot")
 
 
-def check_file_tool(tool, tool_input, qdir):
+def _check_file_tool(tool, tool_input, qdir, protected):
     if tool in ("Read", "Edit", "Write"):
-        check_path(tool_input.get("file_path"), qdir, tool in WRITE_TOOLS)
+        _check_path(tool_input.get("file_path"), qdir, tool in ("Edit", "Write"), protected)
     elif tool == "NotebookEdit":
-        check_path(tool_input.get("notebook_path"), qdir, True)
+        _check_path(tool_input.get("notebook_path"), qdir, True, protected)
     else:
         base = tool_input.get("path") or str(qdir)
-        check_path(base, qdir, False)
+        _check_path(base, qdir, False, protected)
         if tool == "Grep" and tool_input.get("glob") is not None:
             if not isinstance(tool_input["glob"], str):
                 block("guard: Grep glob is not a string")
@@ -254,34 +265,27 @@ def check_file_tool(tool, tool_input, qdir):
                     break
                 static.append(part)
             prefix = str(Path(*static)) if static else "."
-            check_path(prefix if Path(prefix).expanduser().is_absolute()
-                       else str(resolve(base, qdir) / prefix), qdir, False)
+            _check_path(prefix if Path(prefix).expanduser().is_absolute()
+                        else str(resolve(base, qdir) / prefix), qdir, False, protected)
 
 
-def main():
+def _verdict(fn, *args):
     try:
-        data = json.load(sys.stdin)
-        if not isinstance(data, dict):
-            block("guard: hook input is not a JSON object")
-        tool = data.get("tool_name")
-        tool_input = data.get("tool_input")
-        if tool not in QUEEN_TOOLS:
-            block(f"guard: tool {tool!r} is not available to the queen")
-        if not isinstance(tool_input, dict):
-            block("guard: tool_input is not an object")
-        qdir = Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).resolve()
-        if tool in DIALOG_TOOLS:
-            return 0
-        if tool in SHELL_TOOLS:
-            check_bash(tool_input.get("command"), qdir)
-        else:
-            check_file_tool(tool, tool_input, qdir)
-        return 0
-    except SystemExit:
-        raise
-    except Exception as e:  # fail closed
-        block(f"guard: error, blocking: {type(e).__name__}: {e}")
+        fn(*args)
+    except Deny as e:
+        return Verdict("deny", str(e))
+    except Ask as e:
+        return Verdict("ask", str(e))
+    return Verdict("allow", "")
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def check_bash(command, qdir):
+    return _verdict(_check_bash, command, qdir)
+
+
+def check_path(text, qdir, write, protected):
+    return _verdict(_check_path, text, qdir, write, protected)
+
+
+def check_file_tool(tool, tool_input, qdir, protected):
+    return _verdict(_check_file_tool, tool, tool_input, qdir, protected)

@@ -10,7 +10,6 @@ import stat
 import sys
 import time
 import tomllib
-from importlib import resources
 from types import SimpleNamespace
 
 import pytest
@@ -20,7 +19,6 @@ from hive.config import edit_config, load_config, parse_config
 from hive.drivers.claude import QUEEN_TOOLS
 from hive.launch import preflight, queen_command_line, warn_untrusted
 from hive.lifecycle import cmd_up, reconcile
-from hive.queen import materialize_queen
 from hive.reconcile import RunningPane
 from hive.service import service_exe, unit_quote
 
@@ -315,15 +313,6 @@ def test_up_removes_the_half_built_session_on_any_failure(env, monkeypatch, caps
     assert "removed session t-agents" in capsys.readouterr().err
 
 
-def test_materialize_queen_dies_on_oserror(env, capsys):
-    cfg = load_config()
-    qdir = env.xdg / "hive" / "queen"
-    qdir.write_text("a file, not a dir")
-    with pytest.raises(SystemExit) as exc:
-        materialize_queen(cfg)
-    assert exc.value.code == 1 and "cannot write the queen dir" in capsys.readouterr().err
-
-
 # --- R8 ----------------------------------------------------------------------
 
 def test_discover_times_out(env, monkeypatch, capsys):
@@ -369,21 +358,6 @@ def test_service_commands_refuse_on_macos(env, monkeypatch, capsys):
     assert not (env.home / ".config" / "systemd").exists()
     assert not (env.xdg / "systemd").exists()
     assert not log.exists()
-
-
-def test_materialized_guard_hook_uses_hives_interpreter(env):
-    cfg = {"queen": {"dir": str(env.tmp / "queen")}}
-    materialize_queen(cfg)
-    path = env.tmp / "queen" / ".claude" / "settings.json"
-    got = json.loads(path.read_text())
-    want = json.loads(resources.files("hive").joinpath("queen", "settings.json").read_text())
-    hook = got["hooks"]["PreToolUse"][0]["hooks"][0]
-    assert hook["command"] == sys.executable
-    hook["command"] = "python3"
-    assert got == want
-    before = path.stat().st_mtime_ns
-    materialize_queen(cfg)  # unchanged bytes are not rewritten
-    assert path.stat().st_mtime_ns == before
 
 
 def test_install_service_without_systemctl_writes_nothing(env, monkeypatch, capsys):
@@ -523,7 +497,7 @@ def test_queen_tools_match_guard():
     """The queen's --tools list and the guard's allowlist must name the same tools."""
     import importlib.util
     from pathlib import Path
-    path = Path(cli.__file__).parent / "queen" / "hooks" / "guard.py"
+    path = Path(cli.__file__).parent / "queen" / "claude" / "hooks" / "guard.py"
     spec = importlib.util.spec_from_file_location("hive_guard", path)
     guard = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(guard)

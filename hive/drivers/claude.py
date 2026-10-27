@@ -38,8 +38,10 @@ class ClaudeDriver:
     env_scrub = CLAUDE_SESSION_ENV
     config_dir_env = CONFIG_DIR_ENV
     instructions_file = "CLAUDE.md"
-    queen_files = {"CLAUDE.md": "CLAUDE.md", ".claude/settings.json": "settings.json",
-                   ".claude/hooks/guard.py": "hooks/guard.py"}
+    queen_files = {"CLAUDE.md": "claude/rules.md",
+                   ".claude/settings.json": "claude/settings.json",
+                   ".claude/hooks/guard.py": "claude/hooks/guard.py",
+                   ".claude/hooks/guard_core.py": "guard_core.py"}
     supports_queen = True
     inspect_pattern = INSPECT_RE
     assigns_session_id = True

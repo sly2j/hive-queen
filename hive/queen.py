@@ -8,7 +8,7 @@ from pathlib import Path
 from hive.drivers import get_driver
 from hive.util import die
 
-QUEEN_HEADER = "<!-- managed by hive; do not edit, put additions in CLAUDE.local.md -->\n"
+QUEEN_HEADER = "<!-- managed by hive; do not edit -->\n"
 
 
 def queen_settings(src):
@@ -25,6 +25,17 @@ def queen_settings(src):
     return (json.dumps(settings, indent=2) + "\n").encode()
 
 
+# Packaged src path -> renderer(source) for files that are not copied byte for byte.
+# A system with its own rendered file adds an entry here.
+RENDERERS = {"claude/settings.json": queen_settings}
+
+
+def compose_instructions(pkg, src):
+    """The instructions file: header, the common body, then the system's own rules."""
+    return (QUEEN_HEADER.encode() + pkg.joinpath("queen.md").read_bytes() + b"\n"
+            + pkg.joinpath(*src.split("/")).read_bytes())
+
+
 def materialize_queen(cfg):
     """Write the packaged queen instructions into the queen dir when missing or different."""
     driver = get_driver(cfg["queen"].get("system", "claude"))
@@ -35,9 +46,9 @@ def materialize_queen(cfg):
         for dest, src in driver.queen_files.items():
             source = pkg.joinpath(*src.split("/"))
             if dest == driver.instructions_file:
-                data = QUEEN_HEADER.encode() + source.read_bytes()
-            elif src == "settings.json":
-                data = queen_settings(source)
+                data = compose_instructions(pkg, src)
+            elif src in RENDERERS:
+                data = RENDERERS[src](source)
             else:
                 data = source.read_bytes()
             files[qdir / dest] = data

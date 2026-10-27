@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-GUARD = Path(__file__).resolve().parent.parent / "hive" / "queen" / "hooks" / "guard.py"
+GUARD = Path(__file__).resolve().parent.parent / "hive" / "queen" / "claude" / "hooks" / "guard.py"
 HOME = os.path.expanduser("~")
 
 
@@ -346,7 +346,7 @@ def test_spawn_arg_value_skipped_for_trust_target(qdir):
 ])
 def test_is_private_leading_private_only_on_darwin(monkeypatch, platform, path, private):
     import importlib.util
-    spec = importlib.util.spec_from_file_location("guard_mod", GUARD)
+    spec = importlib.util.spec_from_file_location("guard_mod", GUARD.parents[2] / "guard_core.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     monkeypatch.setattr(sys, "platform", platform)
@@ -384,3 +384,59 @@ def test_node_blocked(qdir, command):
 
 def test_profile_still_blocked(qdir):
     assert bash(qdir, "hive --profile x list")[0] == 2
+
+
+# --- spawn --system / --resume, stop --keep-session (R6) --------------------------
+
+SYSTEM_CONFIG = '[defaults]\nsystem = "claude"\n'
+
+
+@pytest.mark.parametrize("command", ["hive spawn x --system codex", "hive spawn x --system=codex",
+                                     "hive spawn x --sys codex"])
+def test_spawn_system_unlisted_asks(qdir, command):
+    write_config(qdir, SYSTEM_CONFIG)
+    assert "hive spawn --system starts a different agent system: codex" in asked(qdir, command)
+
+
+@pytest.mark.parametrize("text", [
+    SYSTEM_CONFIG + '[[agents]]\ntype = "a"\nsystem = "codex"\n',
+    SYSTEM_CONFIG + '[[launchers]]\nname = "c"\nsystem = "codex"\n',
+])
+def test_spawn_system_listed_allowed(qdir, text):
+    write_config(qdir, text)
+    assert asked(qdir, "hive spawn x --system codex") is None
+
+
+def test_spawn_system_without_config_asks(qdir):
+    assert "different agent system: codex" in asked(qdir, "hive spawn x --system codex")
+
+
+def test_spawn_system_and_trust_one_reason(qdir):
+    write_config(qdir, SYSTEM_CONFIG)
+    reason = asked(qdir, "hive spawn --system codex DIR --trust")
+    assert "different agent system: codex" in reason and "trust to DIR" in reason
+    assert reason.endswith("; approve to run it")
+
+
+def test_spawn_target_skips_system_and_resume(qdir):
+    write_config(qdir, SYSTEM_CONFIG + '[[agents]]\nsystem = "codex"\n')
+    assert "trust to x" in asked(qdir, "hive spawn --system codex --resume w x --trust")
+    assert "trust to TYPE" in asked(qdir, "hive spawn --resume NAME TYPE --trust")
+
+
+@pytest.mark.parametrize("command", ["hive spawn TYPE --resume NAME", "hive spawn --resume NAME TYPE"])
+def test_spawn_resume_allowed(qdir, command):
+    write_config(qdir)
+    assert asked(qdir, command) is None
+
+
+@pytest.mark.parametrize("command", ["hive stop X --keep-session",
+                                     "hive stop X --index 1 --keep-session",
+                                     "hive --node swarm stop X --keep-session"])
+def test_stop_keep_session_allowed(qdir, command):
+    assert asked(qdir, command) is None
+
+
+def test_system_denied_with_chaining(qdir):
+    write_config(qdir, SYSTEM_CONFIG)
+    assert bash(qdir, "hive spawn x --system codex; ls")[0] == 2

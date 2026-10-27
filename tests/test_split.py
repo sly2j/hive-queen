@@ -84,7 +84,11 @@ def test_util_imports_nothing_from_hive(module):
 
 
 def test_guard_is_standalone():
-    assert hive_imports(ROOT / "hive" / "queen" / "hooks" / "guard.py") == set()
+    assert hive_imports(ROOT / "hive" / "queen" / "claude" / "hooks" / "guard.py") == set()
+
+
+def test_guard_core_is_standalone():
+    assert hive_imports(ROOT / "hive" / "queen" / "guard_core.py") == set()
 
 
 def test_nothing_imports_cli():
@@ -169,7 +173,7 @@ def test_wheel_has_drivers(tmp_path):
     # Run outside the checkout so the source tree cannot shadow the installed package.
     out = subprocess.run([str(python), "-c", "import hive.drivers.claude, hive.cli, hive.queen; "
                           "from importlib import resources; "
-                          "assert resources.files('hive').joinpath('queen', 'hooks', 'guard.py')"
+                          "assert resources.files('hive').joinpath('queen', 'claude', 'hooks', 'guard.py')"
                           ".is_file(); print(hive.cli.__file__)"], cwd=tmp_path, capture_output=True,
                          text=True, check=True).stdout
     assert str(venv) in out
