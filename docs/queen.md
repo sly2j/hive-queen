@@ -9,8 +9,9 @@ Its directory is `${XDG_CONFIG_HOME:-~/.config}/hive/queen`. hive manages these 
 | System | Managed files |
 | --- | --- |
 | claude | `CLAUDE.md`, `.claude/settings.json`, `.claude/hooks/guard.py`, `.claude/hooks/guard_core.py` |
+| codex | `AGENTS.md`, `.codex/config.toml`, `.codex/hooks.json`, `.codex/hooks/guard.py`, `.codex/hooks/guard_core.py` |
 
-The instructions file (`CLAUDE.md`) is composed from a common body plus the system's own rules. This happens only when the queen pane starts: on a fresh `hive up`, or when reconcile finds the queen missing. After upgrading hive, run `hive restart` to re-sync them. Put your own additions in `CLAUDE.local.md`; hive never writes it.
+The instructions file (`CLAUDE.md`, `AGENTS.md` on Codex) is composed from a common body plus the system's own rules. This happens only when the queen pane starts: on a fresh `hive up`, or when reconcile finds the queen missing. After upgrading hive, run `hive restart` to re-sync them. Put your own additions in `CLAUDE.local.md`; hive never writes it. On Codex there is no such file (an `AGENTS.override.md` would replace `AGENTS.md`): put them in your own `~/.codex/AGENTS.md`. A Codex queen also needs a one-time approval of its folder and guard hook, and again after an upgrade that changes the hook entry; see [The Codex queen](systems/codex.md#the-codex-queen).
 
 The queen runs on the system `[queen] system` names, `claude` by default. A system whose driver does not support the queen is refused with exit 2.
 
@@ -43,5 +44,13 @@ The guard rules common to every system (`guard_core.py`):
 - `.claude/settings.json` allows `Bash(hive:*)` and denies the Read tool on `~/.ssh`, `~/.claude`, `~/.claude.json`, `~/.gnupg`, `~/.aws`, `.env` files and `secrets`/`private` paths.
 - A PreToolUse guard hook (`.claude/hooks/guard.py`, matcher `*`) checks every tool call. If the hook fails (it crashes), the call is blocked; this needs Claude Code >= 2.1.295, and older versions let the call through.
 - The file tools may not write the queen's `.claude/`, `.mcp.json`, `.claude.json` or `CLAUDE.md`; `CLAUDE.local.md` is writable.
+
+### Codex
+
+- The queen runs with `-a never -s danger-full-access`: Codex shows no approval prompts and no sandbox applies, so the guard hook (`.codex/hooks/guard.py`, from the project file `.codex/hooks.json`, matcher `.*`) is the barrier. It runs only once you have trusted it in Codex's "Hooks need review" prompt ([one-time approval](systems/codex.md#one-time-approval)).
+- A Codex hook cannot ask for confirmation, so every call that gets a confirmation prompt above is denied instead, with `codex cannot ask for confirmation; tell the user to run this by hand: <command>`. The queen tells you the command and you run it in a terminal.
+- Tools: the shell tool (checked like Bash above), `apply_patch` (every added, updated, deleted or moved-to path must be inside the queen's directory and not `AGENTS.md`, `AGENTS.override.md` or `.codex/`) and `update_plan`. The guard denies every other tool (MCP tools, subagents, `view_image`, unknown tools). Hosted web search does not pass through hooks, so `.codex/config.toml` turns it off, together with the features that add other tools.
+- There is no question tool; the queen lists numbered choices instead.
+- The guard fails closed when it crashes (exit 2).
 
 What this does not cover: every other single `hive` command runs without a prompt, including `hive stop`. The workers the queen spawns are ordinary panes and get none of these restrictions.

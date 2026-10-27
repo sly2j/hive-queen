@@ -4,6 +4,8 @@ Workers run in the user's default ~/.codex, the only home whose app-server daemo
 the Codex and ChatGPT apps (docs/systems/codex.md). hive passes no -c overrides and no hook flags:
 either one makes the TUI run embedded, off the shared daemon, so the app cannot see the pane.
 Without hooks there is no status file and no session id; state comes from the tmux fallback.
+The queen is the exception: its guard hook lives in the project layer <queen dir>/.codex/, which
+the daemon loads once the user has trusted the folder and the hook in Codex's own prompts.
 """
 
 import json
@@ -189,8 +191,12 @@ class CodexDriver:
     config_dir_env = CONFIG_DIR_ENV
     config_dir_env_msg = CONFIG_DIR_ENV_MSG
     instructions_file = "AGENTS.md"
-    queen_files = {}
-    supports_queen = False
+    queen_files = {"AGENTS.md": "codex/rules.md",
+                   ".codex/config.toml": "codex/config.toml",
+                   ".codex/hooks.json": "codex/hooks.json",
+                   ".codex/hooks/guard.py": "codex/hooks/guard.py",
+                   ".codex/hooks/guard_core.py": "guard_core.py"}
+    supports_queen = True
     inspect_pattern = INSPECT_RE
     assigns_session_id = False  # Codex picks its own id; hive cannot read it in this release
     keep_session_msg = ("codex: session capture not supported in this release; use "
@@ -205,10 +211,11 @@ class CodexDriver:
 
     def trust_state(self, directory, config_dir):
         """(trust root, config.toml, trusted?) for a pane in `directory`. Codex asks only inside
-        a git work tree (verified on 0.164.0), so a dir outside one counts as trusted."""
+        a git work tree or for a dir with its own .codex/ (both seen on 0.164.0), so any other
+        dir counts as trusted."""
         root = trust_root(directory)
         path = codex_home(config_dir) / "config.toml"
-        if not (root / ".git").exists():
+        if not ((root / ".git").exists() or (Path(directory) / ".codex").is_dir()):
             return root, path, True
         try:
             trusted = trust_level(read_toml(path), root) == TRUSTED
@@ -246,5 +253,15 @@ class CodexDriver:
         return None
 
     def queen_extras(self, command, args=()):
-        return command  # no Codex queen in this release (supports_queen is False)
+        """The queen runs with `-a never -s danger-full-access` (docs/systems/codex.md)."""
+        sandbox = re.compile(r"(^|\s)(-s|--sandbox)(\s+|=)\S+")
+        if sandbox.search(command):
+            command = sandbox.sub(r"\1-s danger-full-access", command)
+        elif not any(a in ("-s", "--sandbox") or a.startswith("--sandbox=") for a in args):
+            command += " -s danger-full-access"
+        if not (re.search(r"(^|\s)(-a|--ask-for-approval)(\s|=|$)", command)
+                or any(a in ("-a", "--ask-for-approval") or a.startswith("--ask-for-approval=")
+                       for a in args)):
+            command += " -a never"
+        return command
 

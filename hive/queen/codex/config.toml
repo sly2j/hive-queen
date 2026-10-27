@@ -1,0 +1,14 @@
+# Managed by hive; do not edit. Project config of the hive queen on Codex.
+# Hosted tools run outside the PreToolUse guard, so they are switched off; so are the tools the
+# guard would deny anyway (subagents, apps, images, browser, computer use) and unified exec,
+# whose stdin follow-ups (write_stdin) are not re-checked by the guard.
+web_search = "disabled"
+
+[features]
+multi_agent = false
+apps = false
+unified_exec = false
+view_image = false
+image_generation = false
+browser_use = false
+computer_use = false

@@ -3,7 +3,9 @@
 import json
 import subprocess
 import sys
+import tomllib
 from importlib import resources
+from pathlib import Path
 
 import pytest
 
@@ -71,3 +73,44 @@ def test_packaged_queen_files_exist():
     for driver in DRIVERS.values():
         for src in driver.queen_files.values():
             assert PKG.joinpath(*src.split("/")).is_file(), src
+
+
+def test_materialize_codex_queen(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    qdir = tmp_path / "queen"
+    materialize_queen({"queen": {"dir": str(qdir), "system": "codex"}, "profile": "test"})
+    files = sorted(str(p.relative_to(qdir)) for p in qdir.rglob("*") if p.is_file())
+    assert files == [".codex/config.toml", ".codex/hooks.json", ".codex/hooks/guard.py",
+                     ".codex/hooks/guard_core.py", "AGENTS.md"]
+    assert (qdir / "AGENTS.md").read_bytes() == (
+        b"<!-- managed by hive; do not edit -->\n" + packaged("queen.md") + b"\n"
+        + packaged("codex/rules.md"))
+    hooks = json.loads((qdir / ".codex" / "hooks.json").read_text())
+    hook = hooks["hooks"]["PreToolUse"][0]
+    assert hook["matcher"] == ".*"
+    guard = qdir / ".codex" / "hooks" / "guard.py"
+    assert hook["hooks"][0]["command"] == f"{sys.executable} {guard}"
+    config = tomllib.loads((qdir / ".codex" / "config.toml").read_text())
+    assert config["web_search"] == "disabled"
+    assert config["features"]["unified_exec"] is False
+    assert config["shell_environment_policy"]["set"] == {
+        "PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin", "HIVE_PROFILE": "test"}
+    run = subprocess.run(
+        [sys.executable, str(guard)],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "hive list"}}),
+        capture_output=True, text=True, cwd=tmp_path)
+    assert (run.returncode, run.stdout, run.stderr) == (0, "", "")
+
+
+def test_materialize_codex_default_profile_named_default(tmp_path, monkeypatch):
+    """The daemon may carry a test hive's HIVE_PROFILE; the default queen names its own."""
+    monkeypatch.setenv("PATH", "/h\u00e9/\U0001f600/bin:/bin")
+    materialize_queen({"queen": {"dir": str(tmp_path), "system": "codex"}, "profile": None})
+    config = tomllib.loads((tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8"))
+    env = config["shell_environment_policy"]["set"]
+    assert env["HIVE_PROFILE"] == "default"
+    assert env["PATH"].endswith(":/h\u00e9/\U0001f600/bin:/bin")
+    hooks = tmp_path / ".codex" / "hooks.json"
+    before = hooks.read_bytes()
+    materialize_queen({"queen": {"dir": str(tmp_path), "system": "codex"}, "profile": None})
+    assert hooks.read_bytes() == before  # same bytes: Codex keeps its hook trust

@@ -315,3 +315,35 @@ def test_stop_keep_session_refused_for_codex(tmp_path, monkeypatch, capsys):
     assert "codex: session capture not supported in this release" in err
     assert "`codex resume` inside a new pane" in err
     assert path.read_text() == before
+
+
+def test_codex_trust_state_dot_codex_dir_needs_trust(tmp_path, monkeypatch):
+    """Codex asks to trust a non-git dir once it has its own .codex/ (the queen dir)."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "q" / ".codex").mkdir(parents=True)
+    root, path, trusted = codex.trust_state(str(tmp_path / "q"), None)
+    assert (root, trusted) == (tmp_path / "q", False)
+    codex.seed_trust(root, None)
+    assert codex.trust_state(str(tmp_path / "q"), None)[2] is True
+
+
+@pytest.mark.parametrize("command, args, want", [
+    ("codex {args} -a never -s workspace-write", (), "codex {args} -a never -s danger-full-access"),
+    ("codex --sandbox=read-only", (), "codex -s danger-full-access -a never"),
+    ("codex", (), "codex -s danger-full-access -a never"),
+    ("codex {args}", ("-s", "read-only", "-a", "on-request"), "codex {args}"),
+])
+def test_codex_queen_extras(command, args, want):
+    got = codex.queen_extras(command, args)
+    assert got == want
+    assert "-c" not in got.split() and "workspace-write" not in got
+    assert codex.queen_extras(got, args) == got  # idempotent
+
+
+def test_codex_queen_config_accepted(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    (tmp_path / "hive").mkdir()
+    (tmp_path / "hive" / "config.toml").write_text('[queen]\nsystem = "codex"\n')
+    cfg = load_config()
+    assert cfg["queen"]["system"] == "codex"
+    assert cfg["queen"]["command"] == "codex {args} -a never -s danger-full-access"

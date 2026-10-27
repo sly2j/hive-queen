@@ -25,7 +25,7 @@ dev = ["pytest>=8"]
 packages = ["hive", "hive.drivers"]
 
 [tool.setuptools.package-data]
-hive = ["config.example.toml", "queen/*", "queen/claude/*", "queen/claude/hooks/*", "hooks/*"]
+hive = ["config.example.toml", "queen/*", "queen/claude/*", "queen/claude/hooks/*", "queen/codex/*", "queen/codex/hooks/*", "hooks/*"]
 
 [tool.setuptools.dynamic]
 version = {file = "VERSION"}
