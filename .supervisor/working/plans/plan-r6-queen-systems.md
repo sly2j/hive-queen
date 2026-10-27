@@ -372,13 +372,13 @@ whose pass and fail paths are decided (D-R6.10).
 
 ## Todo
 
-- [ ] Slice 1: `guard_core.py`, `claude/` layout, `queen.md` + `rules.md`, composed
+- [x] Slice 1: `guard_core.py`, `claude/` layout, `queen.md` + `rules.md`, composed
       materialize, package data, test pointers, `tests/test_queen.py`, docs layout table
-- [ ] Slice 2: `--system` guard rule, `SPAWN_VALUE_OPTIONS`, rules and docs prompt list
-- [ ] Slice 3: Claude queen live check in the test profile (user-run), outcomes in `## Log`;
+- [x] Slice 2: `--system` guard rule, `SPAWN_VALUE_OPTIONS`, rules and docs prompt list
+- [x] Slice 3: Claude queen live check in the test profile (user-run), outcomes in `## Log`;
       squash-land Slices 1-3
 - [ ] Unit O: spike (criteria D-R6.10) recorded; on pass `opencode.json`, plugin, adapter,
-      driver flip, tests, docs; on fail limitation line and `Amend parent:` roadmap
+      driver flip, tests, docs; on fail limitation line and `Amend parent:` roadmap — dropped (G1 fail, OpenCode deferred)
 - [ ] Unit C: spike recorded; on pass adapter, `queen_extras`, driver flip, tests, docs; on
       fail limitation line and `Amend parent:` roadmap
 - [ ] Verification passes; production hive and user config dirs unchanged
