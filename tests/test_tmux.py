@@ -115,7 +115,7 @@ def test_lifecycle(hive, tmp_path):
     assert "queen name=hive-queen-t running=yes" in out[1]
     agent = next(line for line in out if line.startswith("agent type=a "))
     assert "count=2 running=2" in agent and 'command="sleep 600"' in agent
-    assert agent.endswith(f"trusted=no trust_file={tmp_path / '.claude.json'}")
+    assert f"trusted=no trust_file={tmp_path / '.claude.json'} system=claude" in agent
     assert sum(line.startswith("pane name=") for line in out) == 3
     assert not any("waiting=" in line for line in out)
 
@@ -126,7 +126,7 @@ def test_lifecycle(hive, tmp_path):
     h.tmux("send-keys", "-t", a2, "-l", "Do you trust the files in this folder?")
     for _ in range(50):
         out = h.run("list").stdout.splitlines()
-        if f"pane name=a-t-2 type=a id={a2} waiting=trust" in out:
+        if f"pane name=a-t-2 type=a id={a2} system=claude waiting=trust" in out:
             break
         time.sleep(0.1)
     else:
@@ -201,9 +201,9 @@ def test_lifecycle(hive, tmp_path):
     assert f'config_dir = "{cc}"' in text
     out = h.run("list").stdout.splitlines()
     assert next(line for line in out if line.startswith("agent type=b-api ")).endswith(
-        f"trusted=yes trust_file={cc / '.claude.json'}")
+        f"trusted=yes trust_file={cc / '.claude.json'} system=claude")
     assert next(line for line in out if line.startswith("agent type=b ")).endswith(
-        f"trusted=yes trust_file={tmp_path / '.claude.json'}")
+        f"trusted=yes trust_file={tmp_path / '.claude.json'} system=claude")
     r = h.run("stop", "b-api")
     assert r.returncode == 0 and "stopped b-api-t-1" in r.stdout
     assert h.windows() == {"hive-queen-t", "a-t", "b-t"}
@@ -573,7 +573,7 @@ def test_second_profile_is_isolated(hive, tmp_path):
         assert r.returncode == 0 and "started b-b-1" in r.stdout and "hive-queen" not in r.stdout, r.stderr
         out = b("list").stdout.splitlines()
         assert out[0].startswith(f"session=b-agents socket={sock} running=yes")
-        assert out[1].startswith("queen name=hive-queen-b running=no") and out[1].endswith("enabled=no")
+        assert out[1].startswith("queen name=hive-queen-b running=no") and out[1].endswith("enabled=no system=claude")
         assert sum(line.startswith("pane name=b-b-") for line in out) == 2
         panes = b_tmux("list-panes", "-a", "-F", "#{@hive_name}").stdout.split()
         assert sorted(panes) == ["b-b-1", "b-b-2"]

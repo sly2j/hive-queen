@@ -5,6 +5,7 @@ import sys
 
 from hive.config import LAUNCHER_NAME_RE, edit_config, expand_config_dir
 from hive.configedit import append_launcher, set_default_launcher
+from hive.drivers import get_driver
 from hive.inspect import LauncherError, inspect_launcher, resolve_launcher
 from hive.launch import check_launcher_command
 from hive.reconcile import ResolveError, parse_records
@@ -31,7 +32,8 @@ def run_discover(cfg):
 def all_launchers(cfg):
     """(registry records, then discover records; discover error or None). Never raises on discover."""
     records = [{"name": l["name"], "source": "config", "config_dir": l["config_dir"],
-                "command": l["command"], "description": l["description"], "shadowed": False}
+                "command": l["command"], "description": l["description"], "shadowed": False,
+                "system": l["system"]}
                for l in cfg["launchers"]]
     if not cfg["discover"]:
         return records, None
@@ -42,15 +44,18 @@ def all_launchers(cfg):
     for r in found:
         records.append({"name": r["name"], "source": "discover", "config_dir": r["config_dir"] or None,
                         "command": r["command"], "description": r.get("description"),
-                        "shadowed": r["name"] in registry})
+                        "shadowed": r["name"] in registry,
+                        "system": cfg["system"]})
     return records, None
 
 
 def launcher_record(cfg, name):
-    """The launcher called `name`: the registry first, then the `[queen] discover` records."""
+    """The launcher called `name`: the registry first, then the `[queen] discover` records.
+    `system` is None for a discover record (discover records run [defaults] system)."""
     for l in cfg["launchers"]:
         if l["name"] == name:
-            return {"name": name, "command": l["command"], "config_dir": l["config_dir"]}
+            return {"name": name, "command": l["command"], "config_dir": l["config_dir"],
+                    "system": l["system"]}
     known = [l["name"] for l in cfg["launchers"]]
     if cfg["discover"]:
         records, error, code = run_discover(cfg)
@@ -58,7 +63,8 @@ def launcher_record(cfg, name):
             die(error, code)
         for record in records:
             if record["name"] == name:
-                return {**record, "config_dir": record["config_dir"] or None}
+                return {**record, "config_dir": record["config_dir"] or None,
+                        "system": None}
         known += [r["name"] for r in records if r["name"] not in known]
     die(f"no launcher '{name}'; available: {', '.join(known) or 'none'}", 2)
 
@@ -71,6 +77,14 @@ def check_launcher_type(cfg, type_name, command, config_dir):
             die(f"type '{type_name}' already exists for '{entry['dir']}' and runs "
                 f"'{entry['command']}'; the launcher's command differs. Give --type <name> "
                 "to start it under another type")
+
+
+def check_system_arg(system):
+    """The driver for a --system value; an unknown system is a usage error (exit 2)."""
+    try:
+        return get_driver(system)
+    except ValueError as e:
+        die(str(e), 2)
 
 
 def cmd_launchers(cfg, args):
@@ -88,7 +102,9 @@ def launchers_add(cfg, args):
               file=sys.stderr)
     if any(r["name"] == name for r in records):
         die(f"launcher '{name}' already exists; names must be unique across the registry and discover", 2)
-    check_launcher_command(args.launch_command, "COMMAND", cfg["system"])
+    system = args.system or cfg["system"]
+    check_system_arg(system)
+    check_launcher_command(args.launch_command, "COMMAND", system)
     try:
         resolve_launcher(args.launch_command)
     except LauncherError as e:
@@ -100,13 +116,16 @@ def launchers_add(cfg, args):
     first = cfg["default_launcher"] is None
 
     def edit(text):
-        text = append_launcher(text, name, args.launch_command, config_dir, args.description)
+        text = append_launcher(text, name, args.launch_command, config_dir, args.description,
+                               args.system)
         return set_default_launcher(text, name) if first else text
 
     def mutate(doc):
         launcher = {"name": name, "command": args.launch_command}
         if config_dir is not None:
             launcher["config_dir"] = config_dir
+        if args.system is not None:
+            launcher["system"] = args.system
         if args.description is not None:
             launcher["description"] = args.description
         doc.setdefault("launchers", []).append(launcher)
@@ -141,7 +160,7 @@ def launchers_list(cfg, args):
     # Stable sort: the default first, then registry, then discover, each in source order.
     for r in sorted(records, key=lambda r: not is_default(r)):
         line = (f"launcher name={quote(r['name'])} source={r['source']} "
-                f"default={'yes' if is_default(r) else 'no'} "
+                f"default={'yes' if is_default(r) else 'no'} system={r['system']} "
                 f"config_dir={quote(r['config_dir'] or 'default')} command={quote(r['command'])}")
         if r["description"]:
             line += f" description={quote(r['description'])}"
@@ -160,7 +179,9 @@ def cmd_discover(cfg, args):
 
 
 def cmd_inspect_launcher(cfg, args):
-    return inspect_launcher(args.launch_command, cfg["inspect_roots"], sys.stdout, sys.stderr)
+    driver = check_system_arg(args.system or cfg["system"])
+    return inspect_launcher(args.launch_command, cfg["inspect_roots"], sys.stdout, sys.stderr,
+                            pattern=driver.inspect_pattern, env_name=driver.config_dir_env)
 
 
 def add_parser(sub, name):
@@ -171,7 +192,9 @@ def add_parser(sub, name):
         lp = launchers_sub.add_parser("add", help="register a launcher in config.toml (never runs it)")
         lp.add_argument("name", metavar="NAME")
         lp.add_argument("launch_command", metavar="COMMAND", help="the full launch command, as one argument")
-        lp.add_argument("--config-dir", metavar="PATH", help="CLAUDE_CONFIG_DIR the launcher uses")
+        lp.add_argument("--config-dir", metavar="PATH", help="config dir the launcher uses")
+        lp.add_argument("--system", metavar="NAME",
+                        help="agent system the launcher runs (default: [defaults] system)")
         lp.add_argument("--description", metavar="TEXT")
         lp = launchers_sub.add_parser("default", help="set the default launcher (edits config)")
         lp.add_argument("name", metavar="NAME")
@@ -179,5 +202,7 @@ def add_parser(sub, name):
         sub.add_parser("discover", help="run [queen] discover and print its output")
     elif name == "inspect-launcher":
         p = sub.add_parser("inspect-launcher",
-                           help="read-only: show a launcher's CLAUDE_CONFIG_DIR evidence (files under inspect_roots only)")
+                           help="read-only: show a launcher's config-dir evidence (files under inspect_roots only)")
         p.add_argument("launch_command", metavar="COMMAND", help="the full launch command, as one argument")
+        p.add_argument("--system", metavar="NAME",
+                       help="agent system whose config-dir evidence to show (default: [defaults] system)")

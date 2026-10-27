@@ -15,11 +15,12 @@
 # inspect_roots = ["~/.local/bin", "/usr/local/bin", "/usr/bin", "/bin", "/opt"]   # the default; the only dirs `hive inspect-launcher` reads from
 
 [defaults]
-# Placeholders: {name} = "<type>-<machine>-<index>" (machine = prefix), {type}, {index}, {dir}, {prefix}, {args}
-command = "claude -n {name} --remote-control {name} --permission-mode auto"
+# Placeholders: {name} = "<type>-<machine>-<index>" (machine = prefix), {type}, {index}, {dir}, {prefix}, {args},
+# {session_id} (fresh UUID per pane launch; without it the driver appends its session flag, for claude `--session-id <uuid>`)
+command = "claude -n {name} --remote-control {name} --permission-mode auto --session-id {session_id}"
 # launcher = "claude"            # default launcher for new types; a [[launchers]] name or a discover name
-# system = "claude"              # agent system that runs the commands; only "claude" so far. Also settable
-#   per [[launchers]], per [[agents]] and in [queen]; an agent's or the queen's own value wins over this one.
+# system = "claude"              # agent system that runs the commands; only "claude" in this release. Also settable
+#   per [[launchers]], per [[agents]] and in [queen]; precedence: agent > launcher > defaults > claude.
 # args = ["--fable"]            # extra launcher flags: list of non-empty strings, each shell-quoted (placeholders expanded first).
 #   Placed at {args} in the command, else appended at the end. A per-type or [queen] args replaces this list, no merge.
 #   A launcher that takes flags before "--" needs {args}: command = "claude-supervisor run api {args} -- -n {name} --remote-control {name}"
@@ -28,7 +29,8 @@ command = "claude -n {name} --remote-control {name} --permission-mode auto"
 # enabled = true                 # default true; false: no queen pane (a running one is stopped), e.g. for a test hive
 # The queen's command always gets `--tools Bash,Monitor,Read,Grep,Glob,Edit,Write,NotebookEdit,AskUserQuestion --strict-mcp-config`
 # appended (unless its command or args already have --tools / --strict-mcp-config), so it has no WebFetch, Agent or MCP tools.
-# command = "claude -n {name} --remote-control {name} --permission-mode auto"   # default: [defaults] command
+# system = "claude"             # default: [defaults] system; the queen's system must be able to run a queen
+# command = "claude -n {name} --remote-control {name} --permission-mode auto --session-id {session_id}"   # default: [defaults] command
 # args = ["--fable"]             # default: [defaults] args
 # discover = "claude-supervisor list"   # `hive discover` runs this and prints its output; `hive spawn --sandbox NAME` reads it:
 #   one record per line, key=value tokens, spaces double-quoted; required keys name, config_dir, command, e.g.
@@ -46,7 +48,8 @@ command = "claude -n {name} --remote-control {name} --permission-mode auto"
 # Launchers: named commands that new types can use, e.g. a sandboxed claude. `hive launchers` lists them.
 # [[launchers]]
 # name = "claude"                  # required, unique, [a-z0-9][a-z0-9-]*
-# command = "claude -n {name} --remote-control {name} --permission-mode auto"   # required; must contain {name} and --remote-control
+# system = "claude"               # optional; default: [defaults] system; COMMAND is checked by that system's driver
+# command = "claude -n {name} --remote-control {name} --permission-mode auto --session-id {session_id}"   # required; must contain {name} and --remote-control
 # config_dir = "~/.claude"         # optional: Claude config dir of this launcher (trust file location); never exported
 # description = "plain claude"     # optional
 
@@ -61,6 +64,8 @@ command = "claude -n {name} --remote-control {name} --permission-mode auto"
 # type = "project"                 # required, unique; window "<type>-<machine>"
 # dir = "~/work/my-project"        # must exist
 # count = 1                        # panes; default 1; 0 keeps the entry without panes
+# indices = [2, 3]                 # instead of count: explicit instance numbers (written by `hive stop --index`); exclusive with count
+# system = "claude"                # optional; default: [defaults] system (`hive spawn --launcher` writes the launcher's); no command = that system's default command
 # command = "claude -n {name} --remote-control {name}"   # optional per-type override of defaults.command
 # config_dir = "~/.claude-sandbox"   # optional: Claude config dir of this type's command; only used to find the trust file <config_dir>/.claude.json, never exported
 # args = ["--fable"]                 # optional per-type args; replaces defaults.args (also: hive spawn --arg=--fable)

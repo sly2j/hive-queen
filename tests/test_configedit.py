@@ -365,3 +365,18 @@ def test_set_indices_inserts_when_no_key():
 def test_set_indices_empty_is_count_zero():
     text = '[[agents]]\ntype = "a"\ndir = "/a"\nindices = [2]\n'
     assert edit_indices(text, "a", []) == text.replace("indices = [2]", "count = 0")
+
+
+def test_append_agent_system_line():
+    out = append_agent("", "w", "~/w", 1, command="fake-agent", config_dir="~/c", system="fake")
+    assert out.splitlines()[-2:] == ['config_dir = "~/c"', 'system = "fake"']
+    assert tomllib.loads(out)["agents"][0]["system"] == "fake"
+    assert "system" not in append_agent("", "w", "~/w", 1)
+
+
+def test_append_launcher_system_line():
+    out = append_launcher("", "l", "run", config_dir="~/c", description="d", system="fake")
+    lines = out.splitlines()
+    assert lines[lines.index('config_dir = "~/c"') + 1] == 'system = "fake"'
+    assert tomllib.loads(out)["launchers"][0]["system"] == "fake"
+    assert "system" not in append_launcher("", "l", "run")

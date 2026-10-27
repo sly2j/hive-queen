@@ -32,7 +32,7 @@ On distributions that follow PEP 668 (for example Debian 13) and on Homebrew Pyt
    hive init
    ```
 
-   This creates `~/.config/hive/config.toml` (or under `$XDG_CONFIG_HOME`). It defines no agents; the default command for agents is `claude -n {name} --remote-control {name} --permission-mode auto`.
+   This creates `~/.config/hive/config.toml` (or under `$XDG_CONFIG_HOME`). It defines no agents; the default command for agents is `claude -n {name} --remote-control {name} --permission-mode auto --session-id {session_id}`.
 
 2. Add an agent type for a project directory:
 

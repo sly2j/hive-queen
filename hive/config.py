@@ -9,8 +9,7 @@ from importlib import resources
 from pathlib import Path
 
 from hive.configedit import ENV_KEY_RE, EditError, verify, write_atomic
-from hive.drivers import DEFAULT_SYSTEM, DRIVERS
-from hive.drivers.claude import CONFIG_DIR_ENV, CONFIG_DIR_ENV_MSG
+from hive.drivers import DEFAULT_SYSTEM, config_dir_envs, get_driver
 from hive.inspect import DEFAULT_ROOTS
 from hive.launch import check_launcher_command, default_shell, queen_command_line
 from hive.paths import PathError, expanduser
@@ -134,9 +133,10 @@ def check_system(table, key, default, path):
     """Optional `system`: the agent system (driver) that runs the command."""
     value = table.get("system", default)
     check_type(value, str, key, path)
-    if value not in DRIVERS:
-        raise ConfigError(f"{path}: '{key}' = {value!r} is not a known system "
-                          f"(known: {', '.join(DRIVERS)})")
+    try:
+        get_driver(value)
+    except ValueError as e:
+        raise ConfigError(f"{path}: '{key}' = {value!r}: {e}") from None
     return value
 
 
@@ -160,8 +160,8 @@ def check_env(env, where, path):
             raise ConfigError(f"{path}: {where}.{key}: env names must match {ENV_KEY_RE.pattern}")
         if not isinstance(value, str):
             raise ConfigError(f"{path}: {where}.{key} must be a string")
-        if key == CONFIG_DIR_ENV:
-            raise ConfigError(f"{path}: {where}.{CONFIG_DIR_ENV}: {CONFIG_DIR_ENV_MSG}")
+        if key in config_dir_envs():
+            raise ConfigError(f"{path}: {where}.{key}: {config_dir_envs()[key]}")
 
 
 def check_args(value, key, path):
@@ -357,7 +357,7 @@ def parse_queen(raw, default_command, default_args, default_system, path):
     check_type(queen, dict, "queen", path)
     check_keys(queen, QUEEN_KEYS, "[queen]", path)
     system = check_system(queen, "queen.system", default_system, path)
-    command = queen.get("command", default_command or DRIVERS[system].default_command)
+    command = queen.get("command", default_command or get_driver(system).default_command)
     check_text(command, "queen.command", path)
     args = check_args(queen.get("args", default_args), "queen.args", path)
     discover = queen.get("discover")
@@ -369,6 +369,9 @@ def parse_queen(raw, default_command, default_args, default_system, path):
     enabled = queen.get("enabled", True)
     if not isinstance(enabled, bool):
         raise ConfigError(f"{path}: 'queen.enabled' must be true or false")
+    if enabled and not get_driver(system).supports_queen:
+        raise ConfigError(f"{path}: queen.system {system!r} cannot run the queen; set "
+                          "[queen] enabled = false or another system")
     return ({"type": "queen", "command": queen_command_line(command, args, system),
              "args": args, "env": env, "config_dir": config_dir, "enabled": enabled,
              "system": system}, discover)
@@ -419,7 +422,10 @@ def parse_agents(raw, default_command, default_args, default_system, path):
                 raise ConfigError(f"{path}: {where}.count must be >= 0")
             indices = list(range(1, count + 1))
 
+        system = check_system(entry, f"{where}.system", default_system, path)
         command = entry.get("command", default_command)
+        if "command" not in entry and system != default_system:
+            command = get_driver(system).default_command
         if command is None:
             raise ConfigError(f"{path}: {where} has no 'command' and [defaults] has no "
                               "'command'")
@@ -435,7 +441,7 @@ def parse_agents(raw, default_command, default_args, default_system, path):
                        "indices": indices, "command": command,
                        "args": agent_args, "env": agent_env,
                        "config_dir": check_config_dir(entry, where, path),
-                       "system": check_system(entry, f"{where}.system", default_system, path)})
+                       "system": system})
     return agents
 
 

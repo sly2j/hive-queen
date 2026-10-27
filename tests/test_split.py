@@ -97,7 +97,8 @@ def test_nothing_imports_cli():
 def test_driver_claude_matches_constants():
     driver = get_driver("claude")
     assert driver.default_command == DEFAULT_QUEEN_COMMAND == (
-        "claude -n {name} --remote-control {name} --permission-mode auto")
+        "claude -n {name} --remote-control {name} --permission-mode auto "
+        "--session-id {session_id}")
     assert driver.required_tokens == ("--remote-control",)
     base = "claude -n {name} --remote-control {name}"
     assert driver.queen_extras(base, []) == (
@@ -149,7 +150,7 @@ def test_system_key(tmp_path, capsys):
             load_config()
         err = capsys.readouterr().err
         assert exc.value.code == 2
-        assert f"'{key}' = 'x' is not a known system (known: claude)" in err
+        assert f"'{key}' = 'x': unknown system 'x' (known: claude)" in err
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")

@@ -21,7 +21,7 @@ positional arguments:
     dirs                read-only: list directories under search_roots
     roots               show search_roots, or add/remove one (edits config)
     nodes               list the remote nodes ([[nodes]]) that --node reaches
-    inspect-launcher    read-only: show a launcher's CLAUDE_CONFIG_DIR evidence (files under
+    inspect-launcher    read-only: show a launcher's config-dir evidence (files under
                         inspect_roots only)
     init                write an example config if none exists
     install-service     write the systemd user unit
@@ -88,7 +88,7 @@ options:
   -h, --help  show this help message and exit
 === hive spawn --help
 usage: hive spawn [-h] [-n N] [--type TYPE] [--command CMD] [--arg ARG] [--config-dir PATH]
-                  [--launcher NAME] [--env KEY=VALUE] [--trust]
+                  [--launcher NAME] [--system NAME] [--env KEY=VALUE] [--trust]
                   TARGET
 
 Add workers: raise the count of an existing agent type, or add a new type for a directory. Exit 3
@@ -102,13 +102,16 @@ options:
   -n N                  number of workers to add (default 1)
   --type TYPE           agent type name for a new entry (default: directory name, plus -<launcher>
                         when a launcher is chosen; letters, digits, '.', '_' and '-' only)
-  --command CMD         command template; must contain {name} and --remote-control
+  --command CMD         command template; must contain the system's required placeholders and
+                        tokens (claude: {name} and --remote-control)
   --arg ARG             flag added to the command of a new type (repeatable); use --arg=--fable
                         for values starting with '-'
-  --config-dir PATH     Claude config dir the command uses; only locates the trust file
+  --config-dir PATH     config dir the command uses; only locates the trust file
   --launcher NAME, --sandbox NAME
                         take command and config_dir from launcher NAME (registry, then [queen]
                         discover); --sandbox is an alias
+  --system NAME         agent system of a new type (default: the launcher's, else [defaults]
+                        system)
   --env KEY=VALUE       env for a new type, exported after [env] (repeatable)
   --trust               record Claude Code workspace trust for the directory (only after the user
                         agreed)
@@ -151,7 +154,8 @@ usage: hive launchers list [-h]
 options:
   -h, --help  show this help message and exit
 === hive launchers add --help
-usage: hive launchers add [-h] [--config-dir PATH] [--description TEXT] NAME COMMAND
+usage: hive launchers add [-h] [--config-dir PATH] [--system NAME] [--description TEXT]
+                          NAME COMMAND
 
 positional arguments:
   NAME
@@ -159,7 +163,8 @@ positional arguments:
 
 options:
   -h, --help          show this help message and exit
-  --config-dir PATH   CLAUDE_CONFIG_DIR the launcher uses
+  --config-dir PATH   config dir the launcher uses
+  --system NAME       agent system the launcher runs (default: [defaults] system)
   --description TEXT
 === hive launchers default --help
 usage: hive launchers default [-h] NAME
@@ -201,13 +206,14 @@ List the [[nodes]] entries of config.toml. Run a command on a node with `hive --
 options:
   -h, --help  show this help message and exit
 === hive inspect-launcher --help
-usage: hive inspect-launcher [-h] COMMAND
+usage: hive inspect-launcher [-h] [--system NAME] COMMAND
 
 positional arguments:
-  COMMAND     the full launch command, as one argument
+  COMMAND        the full launch command, as one argument
 
 options:
-  -h, --help  show this help message and exit
+  -h, --help     show this help message and exit
+  --system NAME  agent system whose config-dir evidence to show (default: [defaults] system)
 === hive init --help
 usage: hive init [-h]
 

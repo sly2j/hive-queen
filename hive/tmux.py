@@ -3,8 +3,9 @@
 import os
 import shlex
 import subprocess
+import uuid
 
-from hive.drivers import DRIVERS
+from hive.drivers import DRIVERS, get_driver
 from hive.launch import expand_pane
 from hive.reconcile import RunningPane, desired_panes, parse_legacy_name, parse_name, queen_name
 from hive.util import die
@@ -89,14 +90,20 @@ def window_ids(cfg):
 
 
 def setup_pane(cfg, pane, pane_id):
-    """Title, tag, and type the command into a freshly created pane."""
+    """Title, tag, and type the command into a freshly created pane; return the session id."""
+    driver = get_driver(pane.system)
+    session_id = (driver.prepare_launch({**cfg["env"], **(pane.env or {})}, pane)
+                  or str(uuid.uuid4()))
     tmux(cfg, "select-pane", "-t", pane_id, "-T", pane.name)
     # Keep apps from overwriting the title; ignore tmux versions without the option.
     tmux(cfg, "set-option", "-p", "-t", pane_id, "allow-set-title", "off", check=False)
     tmux(cfg, "set-option", "-p", "-t", pane_id, "@hive_name", pane.name)
+    if driver.assigns_session_id:
+        tmux(cfg, "set-option", "-p", "-t", pane_id, "@hive_session", session_id)
     tmux(cfg, "send-keys", "-t", pane_id, "-l",
-         shell_line(cfg, pane.dir, expand_pane(cfg, pane), pane.env))
+         shell_line(cfg, pane.dir, expand_pane(cfg, pane, session_id), pane.env))
     tmux(cfg, "send-keys", "-t", pane_id, "Enter")
+    return session_id
 
 
 def start_pane(cfg, pane, window_id):

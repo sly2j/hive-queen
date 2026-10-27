@@ -7,13 +7,12 @@ import sys
 from pathlib import Path
 
 from hive import tmux
-from hive.config import (TYPE_RE, check_config_writable, edit_config, expand_config_dir,
-                         load_config)
+from hive.config import (TYPE_RE, ConfigError, check_config_writable, edit_config,
+                         expand_config_dir, load_config)
 from hive.configedit import ENV_KEY_RE, append_agent, set_indices
-from hive.drivers import get_driver
-from hive.drivers.claude import CONFIG_DIR_ENV, CONFIG_DIR_ENV_MSG
-from hive.launch import check_launcher_command
-from hive.launchers import check_launcher_type, launcher_record
+from hive.drivers import config_dir_envs, get_driver
+from hive.launch import check_launcher_command, check_version
+from hive.launchers import check_launcher_type, check_system_arg, launcher_record
 from hive.lifecycle import kept_queen, reconcile
 from hive.reconcile import (QUEEN_ERROR, RESERVED_TYPES, Existing, New, ResolveError,
                             agent_indices, desired_panes, parse_name, plan, queen_name,
@@ -35,20 +34,22 @@ def cmd_list(cfg, args):
           f"config={cfg['config_path']}")
     print(f"queen name={queen} running={'yes' if queen in running else 'no'} "
           f"dir={cfg['queen']['dir']} {trust_fields(cfg, cfg['queen'])} "
-          f"enabled={'yes' if cfg['queen']['enabled'] else 'no'}")
+          f"enabled={'yes' if cfg['queen']['enabled'] else 'no'} system={cfg['queen']['system']}")
     for agent in cfg["agents"]:
         n = sum(1 for r in running.values() if r.type == agent["type"])
         print(f"agent type={agent['type']} dir={agent['dir']} count={agent['count']}"
               f"{sparse_field(agent_indices(agent))} "
               f"running={n} command={quote(agent['command'])} "
-              f"args={json.dumps(agent['args'])} {trust_fields(cfg, agent)}"
+              f"args={json.dumps(agent['args'])} {trust_fields(cfg, agent)} "
+              f"system={agent['system']}"
               + ("" if Path(agent["dir"]).is_dir() else " dir_missing=yes"))
     systems = {"queen": cfg["queen"]["system"], **{a["type"]: a["system"] for a in cfg["agents"]}}
     for r in running.values():
         screen = tmux.tmux(cfg, "capture-pane", "-p", "-t", r.pane_id, check=False).stdout
-        driver = get_driver(systems.get(r.type, cfg["system"]))
-        waiting = " waiting=trust" if driver.looks_like_prompt(screen) else ""
-        print(f"pane name={r.name} type={r.type} id={r.pane_id}{waiting}")
+        system = systems.get(r.type, cfg["system"])
+        kind = get_driver(system).waiting_kind(screen)
+        waiting = f" waiting={kind}" if kind else ""
+        print(f"pane name={r.name} type={r.type} id={r.pane_id} system={system}{waiting}")
     for u in unmanaged:
         print(f"unmanaged pane={u['pane']} window={u['window']} title={quote(u['title'])}")
     if up:
@@ -114,12 +115,13 @@ def resolve_or_die(cfg, target, type_override=None):
 
 def parse_env_args(items):
     env = {}
+    config_envs = config_dir_envs()
     for item in items or []:
         key, sep, value = item.partition("=")
         if not sep or not ENV_KEY_RE.fullmatch(key):
             die(f"--env '{item}' must be KEY=VALUE with KEY matching {ENV_KEY_RE.pattern}")
-        if key == CONFIG_DIR_ENV:
-            die(f"--env {CONFIG_DIR_ENV}: {CONFIG_DIR_ENV_MSG} (--config-dir or --launcher)")
+        if key in config_envs:
+            die(f"--env {key}: {config_envs[key]} (--config-dir or --launcher)")
         env[key] = value
     return env
 
@@ -162,12 +164,18 @@ def cmd_spawn(cfg, args):
     command, config_dir, type_name = args.agent_command, args.config_dir, args.type
     agent_args = args.agent_args
     record = None
+    if args.system is not None:
+        check_system_arg(args.system)
+        if args.launcher is not None:
+            die("--launcher brings its own system; do not combine it with --system", 2)
+    system = args.system  # None: the launcher's, else [defaults] system
     if args.launcher is not None:
         if command is not None or config_dir is not None:
             die("--launcher takes command and config_dir from the launcher; "
                 "do not combine it with --command or --config-dir")
         record = getattr(args, "launcher_record", None) or launcher_record(cfg, args.launcher)
         command, config_dir = record["command"], record["config_dir"]
+        system = record["system"] or cfg["system"]
         agent_args = record_args(record, agent_args)
         if type_name is None:
             try:
@@ -176,18 +184,19 @@ def cmd_spawn(cfg, args):
                 die(str(e))
         check_launcher_type(cfg, type_name, command, expand_dir_or_none(config_dir))
     if command is not None:
-        check_launcher_command(command, "--command", cfg["system"])
+        check_launcher_command(command, "--command", system or cfg["system"])
     expanded_dir = expand_dir_or_none(config_dir)
     env = parse_env_args(args.env)
     if args.agent_args is not None and not all(args.agent_args):
         die("--arg must not be empty")
     target = resolve_or_die(cfg, args.target, type_name)
     if (isinstance(target, New) and record is None and command is None and config_dir is None
-            and cfg["default_launcher"]):
+            and system is None and cfg["default_launcher"]):
         # A new type with no command given runs the default launcher, named after it.
         record = launcher_record(cfg, cfg["default_launcher"])
         command, config_dir = record["command"], record["config_dir"]
-        check_launcher_command(command, f"launcher '{record['name']}' command", cfg["system"])
+        system = record["system"] or cfg["system"]
+        check_launcher_command(command, f"launcher '{record['name']}' command", system)
         agent_args = record_args(record, agent_args)
         expanded_dir = expand_dir_or_none(config_dir)
         if type_name is None:
@@ -199,6 +208,10 @@ def cmd_spawn(cfg, args):
         target = resolve_or_die(cfg, args.target, type_name)
     if isinstance(target, Existing):
         entry = target.entry
+        if system is not None and system != entry["system"]:
+            die(f"type '{entry['type']}' runs system '{entry['system']}'; to run another system "
+                f"in the same directory give a new type: hive spawn {entry['dir']} "
+                "--type <name> --system ...")
         if command is not None and command != entry["command"]:
             die(f"type '{entry['type']}' runs '{entry['command']}'; to run a different command "
                 f"in the same directory give a new type: hive spawn {entry['dir']} "
@@ -232,6 +245,14 @@ def cmd_spawn(cfg, args):
         die(f"'{target.type}' is not a usable agent type for '{target.dir}'; "
             "give --type with letters, digits, '.', '_' or '-', e.g. "
             f"--type {suggestion}")
+    system = system or cfg["system"]
+    try:
+        check_version(system, "spawn")
+    except ConfigError as e:
+        die(str(e), 2)
+    if command is None and record is None and system != cfg["system"]:
+        command = get_driver(system).default_command  # [defaults] command is the default system's
+    write_system = args.system is not None or system != cfg["system"]
     new_agent = {"type": target.type, "dir": target.stored_dir, "count": args.n}
     if command is not None:
         new_agent["command"] = command
@@ -239,13 +260,16 @@ def cmd_spawn(cfg, args):
         new_agent["args"] = agent_args
     if config_dir is not None:
         new_agent["config_dir"] = config_dir
+    if write_system:
+        new_agent["system"] = system
     if env:
         new_agent["env"] = env
     check_config_writable(cfg)
-    ensure_trust(target.dir, expanded_dir, args.trust, cfg["system"])
+    ensure_trust(target.dir, expanded_dir, args.trust, system)
     edit_config(cfg,
                 lambda text: append_agent(text, target.type, target.stored_dir, args.n,
-                                          command, env, config_dir, agent_args),
+                                          command, env, config_dir, agent_args,
+                                          system if write_system else None),
                 lambda doc: doc.setdefault("agents", []).append(new_agent))
     return after_edit(cfg, target.type, [], list(range(1, args.n + 1)))
 
@@ -351,15 +375,19 @@ def add_parser(sub, name):
         p.add_argument("--type", help="agent type name for a new entry (default: directory name, plus "
                        "-<launcher> when a launcher is chosen; letters, digits, '.', '_' and '-' only)")
         p.add_argument("--command", dest="agent_command", metavar="CMD",
-                       help="command template; must contain {name} and --remote-control")
+                       help="command template; must contain the system's required placeholders and "
+                       "tokens (claude: {name} and --remote-control)")
         p.add_argument("--arg", dest="agent_args", action="append", metavar="ARG",
                        help="flag added to the command of a new type (repeatable); "
                             "use --arg=--fable for values starting with '-'")
         p.add_argument("--config-dir", dest="config_dir", metavar="PATH",
-                       help="Claude config dir the command uses; only locates the trust file")
+                       help="config dir the command uses; only locates the trust file")
         p.add_argument("--launcher", "--sandbox", dest="launcher", metavar="NAME",
                        help="take command and config_dir from launcher NAME (registry, then "
                             "[queen] discover); --sandbox is an alias")
+        p.add_argument("--system", metavar="NAME",
+                       help="agent system of a new type (default: the launcher's, else "
+                            "[defaults] system)")
         p.add_argument("--env", action="append", metavar="KEY=VALUE",
                        help="env for a new type, exported after [env] (repeatable)")
         p.add_argument("--trust", action="store_true",

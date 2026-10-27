@@ -113,7 +113,7 @@ def set_indices(text, type_, indices):
 
 
 def append_agent(text, type_, dir_, count, command=None, env=None, config_dir=None,
-                 args=None):
+                 args=None, system=None):
     check_inline(text.splitlines(keepends=True))
     block = f"[[agents]]\ntype = {toml_string(type_)}\ndir = {toml_string(dir_)}\ncount = {count}\n"
     if command is not None:
@@ -122,6 +122,8 @@ def append_agent(text, type_, dir_, count, command=None, env=None, config_dir=No
         block += f"args = [{', '.join(toml_string(a) for a in args)}]\n"
     if config_dir is not None:
         block += f"config_dir = {toml_string(config_dir)}\n"
+    if system is not None:
+        block += f"system = {toml_string(system)}\n"
     if env:
         # An inline table keeps the block free of [headers] for agent_blocks.
         for key in env:
@@ -133,10 +135,12 @@ def append_agent(text, type_, dir_, count, command=None, env=None, config_dir=No
     return head + "\n\n" + block if head.strip() else block
 
 
-def append_launcher(text, name, command, config_dir=None, description=None):
+def append_launcher(text, name, command, config_dir=None, description=None, system=None):
     block = f"[[launchers]]\nname = {toml_string(name)}\ncommand = {toml_string(command)}\n"
     if config_dir is not None:
         block += f"config_dir = {toml_string(config_dir)}\n"
+    if system is not None:
+        block += f"system = {toml_string(system)}\n"
     if description is not None:
         block += f"description = {toml_string(description)}\n"
     head = text.rstrip("\n")

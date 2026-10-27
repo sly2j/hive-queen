@@ -1,16 +1,22 @@
 """Launcher args: config, placement in the command, configedit, and hive spawn --arg."""
 
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tomllib
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from hive.config import load_config
+from hive.drivers import get_driver
 from hive.drivers.claude import QUEEN_TOOLS
+from hive.lifecycle import cmd_up
+from hive.tmux import setup_pane, start_pane
 from hive.launch import expand_command, expand_pane
 from hive.configedit import append_agent, verify
 from hive.reconcile import desired_panes
@@ -317,3 +323,105 @@ def test_spawn_empty_record_arg_refused(hive, tmp_path):
     assert r.returncode == 2
     assert "launcher 'api': args: empty argument" in r.stderr
     assert hive.config.read_text() == before
+
+
+# 4. session ids
+
+UUID4 = r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+
+
+class RecordingTmux:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, cfg, *args, check=True):
+        self.calls.append(args)
+        rc = 1 if args[0] == "has-session" else 0
+        return SimpleNamespace(returncode=rc, stdout="%1\n", stderr="")
+
+    def typed(self):
+        return [a[-1] for a in self.calls if a[0] == "send-keys" and "-l" in a]
+
+    def sessions(self):
+        return [a[-1] for a in self.calls if a[0] == "set-option" and "@hive_session" in a]
+
+
+def agent_pane(write, tmp_path):
+    write(BASE + agent(dir_=str(tmp_path)))
+    cfg = load_config()
+    return cfg, desired_panes(cfg)[1]
+
+
+def test_session_id_placeholder(write, tmp_path):
+    cfg, pane = agent_pane(write, tmp_path)
+    pane = replace(pane, command="claude -n {name} --session-id {session_id}")
+    assert expand_pane(cfg, pane, "abc") == "claude -n a-t-1 --session-id abc"
+
+
+def test_session_id_placeholder_in_args(write, tmp_path):
+    cfg, pane = agent_pane(write, tmp_path)
+    pane = replace(pane, args=["--session-id={session_id}"])
+    assert expand_pane(cfg, pane, "abc") == "claude -n a-t-1 --remote-control a-t-1 --session-id=abc"
+
+
+def test_session_args_appended_when_absent(write, tmp_path):
+    cfg, pane = agent_pane(write, tmp_path)
+    assert expand_pane(cfg, pane, "abc") == (
+        "claude -n a-t-1 --remote-control a-t-1 --session-id abc")
+    pane = replace(pane, args=["--fable"])
+    assert expand_pane(cfg, pane, "abc").endswith("--fable --session-id abc")
+
+
+def test_expand_pane_without_id_appends_nothing(write, tmp_path):
+    cfg, pane = agent_pane(write, tmp_path)
+    assert expand_pane(cfg, pane) == "claude -n a-t-1 --remote-control a-t-1"
+    pane = replace(pane, command="claude --session-id {session_id}")
+    assert expand_pane(cfg, pane) == "claude --session-id {session_id}"
+
+
+def test_uuid_per_pane(write, tmp_path, monkeypatch):
+    cfg, pane = agent_pane(write, tmp_path)
+    fake = RecordingTmux()
+    monkeypatch.setattr("hive.tmux.tmux", fake)
+    ids = [setup_pane(cfg, pane, "%1"), setup_pane(cfg, pane, "%2")]
+    assert ids[0] != ids[1] and all(re.fullmatch(UUID4, i) for i in ids)
+    assert fake.sessions() == ids
+    for typed, i in zip(fake.typed(), ids):
+        assert typed.endswith(f"--session-id {i}")
+
+
+def test_first_pane_gets_session(write, tmp_path, monkeypatch):
+    write(BASE + agent(dir_=str(tmp_path)))
+    cfg = load_config()
+    fake = RecordingTmux()
+    monkeypatch.setattr("hive.tmux.tmux", fake)
+    monkeypatch.setattr("hive.lifecycle.materialize_queen", lambda cfg: None)
+    monkeypatch.setattr("hive.lifecycle.warn_untrusted", lambda cfg, p: None)
+    monkeypatch.setattr("hive.lifecycle.preflight", lambda cfg, p: None)
+    monkeypatch.setattr("hive.lifecycle.reconcile", lambda cfg, **kw: 0)
+    cmd_up(cfg, None)
+    (sid,) = fake.sessions()
+    assert re.fullmatch(UUID4, sid)
+    assert ("set-option", "-p", "-t", "%1", "@hive_session", sid) in fake.calls
+    assert fake.typed()[0].endswith(f"--session-id {sid}")
+
+
+def test_later_pane_gets_session(write, tmp_path, monkeypatch):
+    cfg, pane = agent_pane(write, tmp_path)
+    fake = RecordingTmux()
+    monkeypatch.setattr("hive.tmux.tmux", fake)
+    assert start_pane(cfg, pane, None) == "%1"
+    (sid,) = fake.sessions()
+    assert ("set-option", "-p", "-t", "%1", "@hive_session", sid) in fake.calls
+    fake.calls.clear()
+    start_pane(cfg, pane, "@1")
+    assert len(fake.sessions()) == 1
+
+
+def test_no_session_option_when_driver_does_not_assign(write, tmp_path, monkeypatch):
+    cfg, pane = agent_pane(write, tmp_path)
+    fake = RecordingTmux()
+    monkeypatch.setattr("hive.tmux.tmux", fake)
+    monkeypatch.setattr(get_driver("claude"), "assigns_session_id", False)
+    setup_pane(cfg, pane, "%1")
+    assert fake.sessions() == []

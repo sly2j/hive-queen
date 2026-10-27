@@ -1,11 +1,16 @@
 """Claude Code: the default command, remote-control rule, trust and queen flags."""
 
+import json
 import re
+import shlex
 
-from hive.trust import is_trusted, looks_like_trust_prompt, seed_trust, trust_file, trust_root
+from hive.drivers.common import match_waiting, probe_version
+from hive.trust import (TRUST_PROMPT_PHRASES, is_trusted, seed_trust, trust_file,
+                        trust_root)
 
 # Used when neither [queen] nor [defaults] sets a command.
-DEFAULT_QUEEN_COMMAND = "claude -n {name} --remote-control {name} --permission-mode auto"
+DEFAULT_QUEEN_COMMAND = ("claude -n {name} --remote-control {name} --permission-mode auto "
+                         "--session-id {session_id}")
 # Tool allowlist for the queen; the guard hook enforces the same set.
 QUEEN_TOOLS = "Bash,Monitor,Read,Grep,Glob,Edit,Write,NotebookEdit,AskUserQuestion"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
@@ -37,6 +42,17 @@ class ClaudeDriver:
                    ".claude/hooks/guard.py": "hooks/guard.py"}
     supports_queen = True
     inspect_pattern = INSPECT_RE
+    assigns_session_id = True
+    binary = "claude"
+    min_version = None
+    install_hint = "curl -fsSL https://claude.ai/install.sh | bash"
+    versions = ("2.1.311",)
+    required_placeholders = ("{name}",)
+    config_dir_env_msg = CONFIG_DIR_ENV_MSG
+    waiting_kinds = (("trust", TRUST_PROMPT_PHRASES),
+                     ("theme", ("choose the text style",)),
+                     ("login", ("select login method",)),
+                     ("rc_consent", ("enable remote control",)))
 
     def trust_state(self, directory, config_dir):
         """(trust root, trust file, trusted?) for a pane in `directory`."""
@@ -46,8 +62,29 @@ class ClaudeDriver:
     def seed_trust(self, root, config_dir):
         seed_trust(root, config_dir)
 
-    def looks_like_prompt(self, screen):
-        return looks_like_trust_prompt(screen)
+    def waiting_kind(self, screen):
+        return match_waiting(self.waiting_kinds, screen)
+
+    def probe(self, binary):
+        return probe_version(binary)
+
+    def session_args(self, session_id):
+        return ["--session-id", session_id]
+
+    def resume_args(self, session_id):
+        return ["--resume", session_id]
+
+    def hook_args(self, hook_cmd, state_file):
+        """--settings JSON wiring the lifecycle hooks to `hook_cmd <state_file>`."""
+        entry = {"hooks": [{"type": "command",
+                            "command": shlex.join([*hook_cmd, str(state_file)])}]}
+        events = ("SessionStart", "Stop", "Notification", "SessionEnd")
+        settings = {"hooks": {ev: [dict(entry)] for ev in events}}
+        settings["hooks"]["Notification"][0]["matcher"] = "permission_prompt|idle_prompt"
+        return ["--settings", json.dumps(settings)]
+
+    def prepare_launch(self, env, pane):
+        return None  # hive's own uuid4 is the session id
 
     def queen_extras(self, command, args=()):
         """The queen runs with a tool allowlist and no MCP servers, whatever command it got.

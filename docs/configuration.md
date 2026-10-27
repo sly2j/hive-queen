@@ -11,10 +11,11 @@ The config file is `${XDG_CONFIG_HOME:-~/.config}/hive/config.toml`. Unknown key
 | `shell` | Shell for `login_shell`. Default: your login shell from passwd, else `$SHELL`, else `/bin/sh`. |
 | `search_roots` | Optional list of directories where `hive spawn NAME` looks for a directory `NAME`, and that `hive dirs` lists. `hive spawn` skips roots that do not exist; `hive dirs` reports them as `root=<path> error=missing`. `hive roots add\|remove PATH` edits it. |
 | `inspect_roots` | Optional list of the only directories `hive inspect-launcher` reads from. Default: `["~/.local/bin", "/usr/local/bin", "/usr/bin", "/bin", "/opt"]`. |
+| `[defaults] system` | Optional agent system that runs the commands. Only `claude` in this release; see [Claude](systems/claude.md). Also a key on `[queen]`, `[[agents]]` and `[[launchers]]`; precedence agent > launcher > defaults > `claude`. An agent whose system differs from `[defaults] system` and that has no `command` uses its system's default command. An unknown name is an error (exit 2) listing the known ones; opencode and codex say "not in this release". The queen's system must be able to run a queen. |
 | `[defaults] command` | Command for every agent type without its own `command`. |
 | `[defaults] launcher` | Optional name of the default launcher for new types: a `[[launchers]]` name or a `[queen] discover` name. Only checked against `[[launchers]]` at load; other names are looked up in discover when used. |
 | `[defaults] args` | Optional list of non-empty strings, extra flags for the command (e.g. `["--fable"]`); see `args` below. A type's or the queen's own `args` replaces this list, it is not merged. Anything else is an error: `'<key>' must be an array of non-empty strings`. |
-| `[queen] command` | Optional command for the queen. Default: `[defaults] command`, else `claude -n {name} --remote-control {name} --permission-mode auto`. |
+| `[queen] command` | Optional command for the queen. Default: `[defaults] command`, else `claude -n {name} --remote-control {name} --permission-mode auto --session-id {session_id}`. |
 | `[queen] args` | Optional list of strings; replaces `[defaults] args`, no merge. hive appends its `--tools ... --strict-mcp-config` allowlist unless the command or these args already contain `--tools` or `--strict-mcp-config`. |
 | `[queen] discover` | Optional shell command that `hive discover` runs; its output is printed as is. `hive spawn --launcher NAME` also runs it (timeout 60 s) and reads one record per line (see `hive discover`). |
 | `[queen] config_dir` | Optional Claude config dir of the queen's command. Only used to find the trust file `<config_dir>/.claude.json`; never exported. |
@@ -44,9 +45,9 @@ Validation rules:
 - `tmux_socket` must be non-empty and contain no whitespace (`x.y` is valid).
 - `search_roots` entries, `dir`, `config_dir` and `inspect_roots` entries must be absolute or start with `~` (expanded), and must not be empty.
 - Commands and `shell` must not be empty.
-- Env names (in `[env]`, `env` tables and `spawn --env`) must match `[A-Za-z_][A-Za-z0-9_]*`. `CLAUDE_CONFIG_DIR` is rejected everywhere, because hive never sets it; use `config_dir`.
+- Env names (in `[env]`, `env` tables and `spawn --env`) must match `[A-Za-z_][A-Za-z0-9_]*`. `CLAUDE_CONFIG_DIR` (the variable each system reads for its config dir) is rejected everywhere, because hive never sets it; use `config_dir`.
 
-Placeholders in commands, replaced by plain text substitution (other braces such as `${VAR}` are untouched): `{name}` = `<type>-<machine>-<index>` (`<machine>` is `prefix`; index starts at 1), `{type}`, `{index}`, `{dir}`, `{prefix}`, `{args}` (see below).
+Placeholders in commands, replaced by plain text substitution (other braces such as `${VAR}` are untouched): `{name}` = `<type>-<machine>-<index>` (`<machine>` is `prefix`; index starts at 1), `{type}`, `{index}`, `{dir}`, `{prefix}`, `{session_id}` (a fresh UUID per pane launch; without it the driver's session flag is appended, for Claude `--session-id <uuid>`, see [Claude](systems/claude.md#session-id)), `{args}` (see below). `{session_id}` is also expanded in `args`.
 
 `args` (optional on `[defaults]`, `[[agents]]` and `[queen]`) entries get the same placeholders expanded, are each shell-quoted (shlex) and joined by spaces. That string replaces every `{args}` in the command; without `{args}` it is appended at the end (nothing is added when there are no args). A launcher that takes its own flags before a `--` separator needs `{args}`, e.g. `command = "claude-supervisor run api {args} -- -n {name} --remote-control {name}"`; appended after `--` the args would go to claude.
 

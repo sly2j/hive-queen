@@ -8,6 +8,7 @@ import json
 import os
 import stat
 import sys
+import tomllib
 from importlib import resources
 from types import SimpleNamespace
 
@@ -619,7 +620,7 @@ def test_list_queen_disabled(env, monkeypatch, capsys):
     code, out, _ = hive(monkeypatch, capsys, "list")
     lines = out.splitlines()
     assert code == 0 and lines[1].startswith("queen name=hive-queen-t running=yes")
-    assert lines[1].endswith(" enabled=no")
+    assert lines[1].endswith(" enabled=no system=claude")
     assert "drift start=none stop=hive-queen-t" in lines
 
 
@@ -633,7 +634,6 @@ def agents_cfg(env, *blocks):
 
 
 def agent_entry(env, kind):
-    import tomllib
     return next(a for a in tomllib.loads(env.cfg.read_text())["agents"] if a["type"] == kind)
 
 
@@ -755,3 +755,199 @@ def test_stop_instance_of_dot_type(env, monkeypatch, capsys):
     code, _, err = hive(monkeypatch, capsys, "stop", ".a-t-1")
     assert code == 0, err
     assert agent_entry(env, ".a")["indices"] == [2]
+
+
+# --- agent systems: list, spawn --system, launchers, inspect-launcher (R1) -----------------
+
+class ScreenTmux(FakeTmux):
+    """capture-pane returns `screen`."""
+    def __init__(self, screen=""):
+        super().__init__()
+        self.screen = screen
+
+    def __call__(self, cfg, *args, check=True):
+        super().__call__(cfg, *args, check=check)
+        out = self.screen if args[0] == "capture-pane" else "%1\n"
+        return SimpleNamespace(returncode=0, stdout=out, stderr="")
+
+
+def list_with_pane(env, monkeypatch, capsys, screen):
+    agents_cfg(env, ("a", "count = 1"))
+    monkeypatch.setattr("hive.tmux.session_running", lambda cfg: True)
+    monkeypatch.setattr("hive.tmux.tmux", ScreenTmux(screen))
+    pane = RunningPane("%5", "@0", "a-t", "a-t-1", "a", 1, False)
+    monkeypatch.setattr("hive.tmux.running_panes", lambda cfg: ({"a-t-1": pane}, []))
+    code, out, _ = hive(monkeypatch, capsys, "list")
+    assert code == 0
+    return out.splitlines()
+
+
+def test_list_prints_system(env, monkeypatch, capsys):
+    agents_cfg(env, ("a", "count = 1"))
+    code, out, _ = hive(monkeypatch, capsys, "list")
+    lines = out.splitlines()
+    assert code == 0
+    assert lines[1].startswith("queen ") and lines[1].endswith(" system=claude")
+    agent = next(line for line in lines if line.startswith("agent "))
+    assert " system=claude" in agent and "dir_missing" not in agent
+
+
+def test_list_dir_missing_stays_last(env, monkeypatch, capsys):
+    env.cfg.write_text(BASE + f'\n[[agents]]\ntype = "a"\ndir = "{env.tmp / "gone"}"\n')
+    _, out, _ = hive(monkeypatch, capsys, "list")
+    agent = next(line for line in out.splitlines() if line.startswith("agent "))
+    assert agent.endswith(" system=claude dir_missing=yes")
+
+
+def test_list_waiting_kind(env, monkeypatch, capsys):
+    lines = list_with_pane(env, monkeypatch, capsys, "Select login method:\n")
+    assert "pane name=a-t-1 type=a id=%5 system=claude waiting=login" in lines
+
+
+def test_list_waiting_trust_unchanged(env, monkeypatch, capsys):
+    lines = list_with_pane(env, monkeypatch, capsys, "Do you trust the files in this folder?\n")
+    assert "pane name=a-t-1 type=a id=%5 system=claude waiting=trust" in lines
+    lines = list_with_pane(env, monkeypatch, capsys, "all quiet\n")
+    assert "pane name=a-t-1 type=a id=%5 system=claude" in lines
+
+
+def spawn_dir(env):
+    d = env.tmp / "w"
+    d.mkdir(exist_ok=True)
+    return str(d)
+
+
+def test_spawn_system_flag(env, monkeypatch, capsys, fake_driver):
+    code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env), "--system", "fake",
+                        "--command", "fake-agent")
+    assert code == 0, err
+    entry = agent_entry(env, "w")
+    assert entry["system"] == "fake" and entry["command"] == "fake-agent"
+
+
+def test_spawn_system_without_command_uses_driver_default(env, monkeypatch, capsys, fake_driver):
+    code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env), "--system", "fake")
+    assert code == 0, err
+    entry = agent_entry(env, "w")
+    assert entry["system"] == "fake" and entry["command"] == type(fake_driver).default_command
+
+
+def test_spawn_system_ignores_the_default_launcher(env, monkeypatch, capsys, fake_driver):
+    env.cfg.write_text(BASE.replace("[defaults]", '[defaults]\nlauncher = "x"')
+                       + '\n[[launchers]]\nname = "x"\ncommand = "run {name} --remote-control"\n')
+    code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env), "--system", "fake")
+    assert code == 0, err
+    entry = agent_entry(env, "w")
+    assert entry["command"] == type(fake_driver).default_command and "config_dir" not in entry
+
+
+def test_spawn_system_with_launcher_is_usage_error(env, monkeypatch, capsys, fake_driver):
+    env.cfg.write_text(BASE + FAKE_LAUNCHER)
+    before = env.cfg.read_bytes()
+    code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env), "--system", "fake",
+                        "--launcher", "fk")
+    assert code == 2 and "--launcher brings its own system" in err
+    assert env.cfg.read_bytes() == before
+
+
+def test_spawn_unknown_system(env, monkeypatch, capsys):
+    before = env.cfg.read_bytes()
+    code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env), "--system", "nope")
+    assert code == 2 and "unknown system 'nope'" in err
+    assert env.cfg.read_bytes() == before
+
+
+def test_spawn_system_differs_from_existing_type(env, monkeypatch, capsys, fake_driver):
+    agents_cfg(env, ("a", "count = 1"))
+    code, _, err = hive(monkeypatch, capsys, "spawn", "a", "--system", "fake")
+    assert code == 2 and "runs system 'claude'" in err
+
+
+def test_spawn_launcher_system_differs_from_existing_type(env, monkeypatch, capsys, fake_driver):
+    # same command and config_dir as the launcher, but the type runs claude
+    env.cfg.write_text(BASE + FAKE_LAUNCHER + f'\n[[agents]]\ntype = "w-fk"\ndir = "{spawn_dir(env)}"\n'
+                       'command = "fake-agent --go"\n')
+    code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env), "--launcher", "fk")
+    assert code == 2 and "runs system 'claude'" in err
+
+
+FAKE_LAUNCHER = ('\n[[launchers]]\nname = "fk"\ncommand = "fake-agent --go"\n'
+                 'system = "fake"\n')
+
+
+def test_spawn_launcher_copies_system_and_checks_with_it(env, monkeypatch, capsys, fake_driver):
+    env.cfg.write_text(BASE + FAKE_LAUNCHER)
+    code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env), "--launcher", "fk")
+    assert code == 0, err
+    entry = agent_entry(env, "w-fk")
+    assert entry["system"] == "fake" and entry["command"] == "fake-agent --go"
+    assert fake_driver.trust_calls == []  # trusted: nothing seeded, no exit 3
+
+
+def test_system_precedence(env, monkeypatch, capsys, fake_driver):
+    # a launcher's system beats [defaults] system; --system beats the default launcher
+    env.cfg.write_text(BASE.replace("[defaults]", '[defaults]\nlauncher = "fk"') + FAKE_LAUNCHER)
+    code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env))
+    assert code == 0, err
+    assert agent_entry(env, "w-fk")["system"] == "fake"
+    code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env), "--type", "plain",
+                        "--system", "claude", "--command", "sleep 600 {name} --remote-control")
+    assert code == 3, err  # untrusted claude dir exits 3 before any edit
+    code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env), "--type", "viafake",
+                        "--system", "fake")
+    assert code == 0, err
+    assert agent_entry(env, "viafake")["system"] == "fake"
+
+
+def test_spawn_probe_below_min(env, monkeypatch, capsys, fake_driver):
+    fake_driver.min_version = (9, 0, 0)
+    fake_bin(env.tmp, monkeypatch, "fake-agent", 'echo "fake 1.0.0"')
+    before = env.cfg.read_bytes()
+    code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env), "--system", "fake")
+    assert code == 2 and fake_driver.install_hint in err
+    assert env.cfg.read_bytes() == before
+
+
+def test_launchers_add_system(env, monkeypatch, capsys, fake_driver):
+    fake_bin(env.tmp, monkeypatch, "fake-agent")
+    code, _, err = hive(monkeypatch, capsys, "launchers", "add", "fk", "fake-agent --go",
+                        "--system", "fake")
+    assert code == 0, err
+    launcher = tomllib.loads(env.cfg.read_text())["launchers"][0]
+    assert launcher["system"] == "fake"
+    _, out, _ = hive(monkeypatch, capsys, "launchers")
+    assert " system=fake " in out
+    code, _, err = hive(monkeypatch, capsys, "launchers", "add", "bad", "fake-agent",
+                        "--system", "nope")
+    assert code == 2 and "unknown system" in err
+
+
+def test_launchers_add_default_system_writes_no_line(env, monkeypatch, capsys):
+    fake_bin(env.tmp, monkeypatch, "claude")
+    code, _, err = hive(monkeypatch, capsys, "launchers", "add", "c",
+                        "claude -n {name} --remote-control")
+    assert code == 0, err
+    assert "system" not in tomllib.loads(env.cfg.read_text())["launchers"][0]
+    _, out, _ = hive(monkeypatch, capsys, "launchers")
+    assert " system=claude " in out
+
+
+def test_inspect_launcher_system_flag(env, monkeypatch, capsys, fake_driver):
+    root = env.tmp / "roots"
+    root.mkdir()
+    script = root / "fake-agent"
+    script.write_text("#!/bin/sh\nexport FAKE_HOME=/somewhere\nexec true\n")
+    script.chmod(0o755)
+    env.cfg.write_text(f'inspect_roots = ["{root}"]\n' + BASE)
+    code, out, err = hive(monkeypatch, capsys, "inspect-launcher", str(script),
+                          "--system", "fake")
+    assert code == 0, err
+    assert "FAKE_HOME=/somewhere" in out
+    code, _, err = hive(monkeypatch, capsys, "inspect-launcher", str(script), "--system", "nope")
+    assert code == 2
+
+
+def test_env_rejects_fake_config_dir_env(env, monkeypatch, capsys, fake_driver):
+    for key in ("FAKE_HOME", "CLAUDE_CONFIG_DIR"):
+        code, _, err = hive(monkeypatch, capsys, "spawn", spawn_dir(env), "--env", f"{key}=/x")
+        assert code == 2 and f"--env {key}:" in err and "--config-dir or --launcher" in err

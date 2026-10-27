@@ -304,9 +304,9 @@ def test_launchers_list_default_first(write, monkeypatch, capsys):
     for argv in (("launchers",), ("launchers", "list")):
         code, out, _ = run_hive(monkeypatch, capsys, *argv)
         assert code == 0
-        assert out[0].startswith('launcher name="b" source=config default=yes config_dir="/cc/b" ')
+        assert out[0].startswith('launcher name="b" source=config default=yes system=claude config_dir="/cc/b" ')
         assert out[0].endswith('description="the b one"')
-        assert out[1].startswith('launcher name="a" source=config default=no config_dir="default" ')
+        assert out[1].startswith('launcher name="a" source=config default=no system=claude config_dir="default" ')
 
 
 def discover_config(tmp_path, script):
@@ -592,3 +592,41 @@ def test_node_validation(write, capsys, entry, error):
 def test_duplicate_node_name(write, capsys):
     write(BASE + '\n[[nodes]]\nname = "n"\nhost = "a"\n\n[[nodes]]\nname = "n"\nhost = "b"\n')
     fails(capsys, "duplicate node name 'n'")
+
+
+def agent(extra="", type_="a", dir_="/a"):
+    return f'\n[[agents]]\ntype = "{type_}"\ndir = "{dir_}"\n{extra}'
+
+
+def test_env_rejects_every_config_dir_env(write, capsys, fake_driver):
+    write(BASE + '\n[env]\nFAKE_HOME = "x"\n')
+    fails(capsys, f"env.FAKE_HOME: {fake_driver.config_dir_env_msg}")
+    write(BASE + agent('env = { FAKE_HOME = "x" }\n'))
+    fails(capsys, f"agents[1].env.FAKE_HOME: {fake_driver.config_dir_env_msg}")
+    write(BASE + '\n[env]\nCLAUDE_CONFIG_DIR = "x"\n')
+    fails(capsys, "env.CLAUDE_CONFIG_DIR")
+
+
+def test_queen_system_unsupported(write, capsys, fake_driver):
+    write(BASE + '\n[queen]\nsystem = "fake"\n')
+    fails(capsys, "queen.system 'fake' cannot run the queen")
+    write(BASE + '\n[queen]\nsystem = "fake"\nenabled = false\n')
+    assert load_config()["queen"]["system"] == "fake"
+
+
+def test_parse_agents_non_default_system_without_command(write, fake_driver):
+    write(BASE + agent('system = "fake"\n', "f") + agent("", "c"))
+    agents = {a["type"]: a for a in load_config()["agents"]}
+    assert agents["f"]["command"] == fake_driver.default_command
+    assert agents["c"]["command"] == "claude -n {name} --remote-control {name}"
+    write(BASE + agent('system = "fake"\ncommand = "mine {name}"\n', "f"))
+    assert load_config()["agents"][0]["command"] == "mine {name}"
+
+
+def test_system_precedence_in_config(write, fake_driver):
+    write('prefix = "t"\n\n[defaults]\nsystem = "fake"\ncommand = "x {name}"\n\n'
+          '[queen]\nenabled = false\n\n[[launchers]]\nname = "l"\ncommand = "l"\n'
+          + agent("", "a") + agent('system = "claude"\ncommand = "claude -n {name} --remote-control {name}"\n', "b"))
+    cfg = load_config()
+    assert cfg["launchers"][0]["system"] == "fake"
+    assert {a["type"]: a["system"] for a in cfg["agents"]} == {"a": "fake", "b": "claude"}

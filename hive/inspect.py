@@ -1,4 +1,4 @@
-"""hive inspect-launcher: read-only look at a launcher for the Claude config dir it uses.
+"""hive inspect-launcher: read-only look at a launcher for the config dir its system uses.
 
 Only files under the configured roots are read, never executed. Output is one
 key=value record per line, like `hive list`.
@@ -92,8 +92,10 @@ def resolve_launcher(command, environ=os.environ):
     return locate_launcher(command, environ)[0]
 
 
-def inspect_launcher(command, roots, out, err, environ=os.environ):
-    """Print what COMMAND's launcher reveals about CLAUDE_CONFIG_DIR. Returns the exit code."""
+def inspect_launcher(command, roots, out, err, environ=os.environ, pattern=MATCH_RE,
+                     env_name="CLAUDE_CONFIG_DIR"):
+    """Print what COMMAND's launcher reveals about the config dir (lines matching PATTERN, then
+    ENV_NAME's value in ENVIRON; no env line when None). Returns the exit code."""
     try:
         path, resolved, shown = locate_launcher(command, environ)
     except LauncherNotFound as e:
@@ -132,7 +134,7 @@ def inspect_launcher(command, roots, out, err, environ=os.environ):
         shown_lines = 0
         for n, line in enumerate(lines, 1):
             secret = SECRET_RE.search(line)
-            if not secret and not MATCH_RE.search(line):
+            if not secret and not pattern.search(line):
                 continue
             if shown_lines == MAX_LINES:
                 print("more=yes", file=out)
@@ -143,6 +145,7 @@ def inspect_launcher(command, roots, out, err, environ=os.environ):
             else:
                 print(f"line={n} text={shlex.quote(line)}", file=out)
 
-    value = environ.get("CLAUDE_CONFIG_DIR")
-    print(f"env CLAUDE_CONFIG_DIR={shlex.quote(value) if value is not None else 'unset'}", file=out)
+    if env_name is not None:
+        value = environ.get(env_name)
+        print(f"env {env_name}={shlex.quote(value) if value is not None else 'unset'}", file=out)
     return 0

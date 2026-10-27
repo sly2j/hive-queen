@@ -28,3 +28,65 @@ def _isolate(tmp_path_factory, monkeypatch, _tmux_tmpdir):
     monkeypatch.setenv("TMUX_TMPDIR", _tmux_tmpdir)
     for name in ("CLAUDE_CONFIG_DIR", "TMUX", "TMUX_PANE", "HIVE_PROFILE"):
         monkeypatch.delenv(name, raising=False)
+
+
+class FakeDriver:
+    """A second system for seam tests: no required tokens, its own config-dir env, no queen."""
+    name = "fake"
+    default_command = "fake-agent {args}"
+    required_tokens = ()
+    required_placeholders = ()
+    env_scrub = frozenset()
+    config_dir_env = "FAKE_HOME"
+    config_dir_env_msg = "fake reads FAKE_HOME from its command"
+    instructions_file = "AGENTS.md"
+    queen_files = {}
+    supports_queen = False
+    assigns_session_id = False
+    binary = "fake-agent"
+    min_version = None
+    install_hint = "install fake-agent from example.org"
+    versions = ("1.0.0",)
+    waiting_kinds = ()
+
+    def __init__(self):
+        import re
+        self.inspect_pattern = re.compile(r"FAKE_HOME")
+        self.trust_calls = []
+
+    def trust_state(self, directory, config_dir):
+        return directory, None, True
+
+    def seed_trust(self, root, config_dir):
+        self.trust_calls.append((root, config_dir))
+
+    def waiting_kind(self, screen):
+        return None
+
+    def probe(self, binary):
+        from hive.drivers.common import probe_version
+        return probe_version(binary)
+
+    def session_args(self, session_id):
+        return []
+
+    def resume_args(self, session_id):
+        return ["resume", session_id]
+
+    def hook_args(self, hook_cmd, state_file):
+        return []
+
+    def prepare_launch(self, env, pane):
+        return None
+
+    def queen_extras(self, command, args=()):
+        return command
+
+
+@pytest.fixture
+def fake_driver(monkeypatch):
+    """Register FakeDriver as system "fake" for one test."""
+    from hive import drivers
+    driver = FakeDriver()
+    monkeypatch.setitem(drivers.DRIVERS, "fake", driver)
+    return driver

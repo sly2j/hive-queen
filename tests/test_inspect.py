@@ -161,3 +161,19 @@ def test_resolve_launcher_symlink_outside_roots_accepted(tmp_path, bindir):
 def test_is_private_leading_private_only_on_darwin(monkeypatch, platform, path, private):
     monkeypatch.setattr("sys.platform", platform)
     assert is_private(path) is private
+
+
+def test_inspect_launcher_system_pattern(bindir, fake_driver):
+    script(bindir / "fakel", 'export FAKE_HOME=/x\nexport OTHER=1\n')
+    out, err = io.StringIO(), io.StringIO()
+    code = inspect_launcher("fakel", [str(bindir)], out, err, {"PATH": str(bindir), "FAKE_HOME": "/h"},
+                            pattern=fake_driver.inspect_pattern, env_name="FAKE_HOME")
+    assert code == 0, err.getvalue()
+    lines = out.getvalue().splitlines()
+    assert "line=2 text='export FAKE_HOME=/x'" in lines
+    assert not any("OTHER" in line for line in lines)
+    assert lines[-1] == "env FAKE_HOME=/h"
+    out = io.StringIO()
+    inspect_launcher("fakel", [str(bindir)], out, io.StringIO(), {"PATH": str(bindir)},
+                     pattern=fake_driver.inspect_pattern, env_name=None)
+    assert not any(line.startswith("env ") for line in out.getvalue().splitlines())
