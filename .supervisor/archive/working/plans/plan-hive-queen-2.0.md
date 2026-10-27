@@ -1,6 +1,8 @@
 # Plan: hive queen 2.0 (program plan)
 
 Release `2.x`. Parent plan; packages R0-R8 below. Roadmap: `.supervisor/roadmap.md`.
+Status: implemented (R0-R8b), released as hive queen 2.0 (cedba4b, tag v2.0) on 2026-10-27.
+
 Planned against `main` 55e2298 (VERSION 1.23, `hive/cli.py` 1599 lines): CI exists
 (`.github/workflows/test.yml`, pytest on ubuntu and macos, Python 3.11 and 3.13) and macOS is a
 supported platform (`die_if_macos`, `hive/cli.py:1374`, gates the systemd commands).
@@ -669,7 +671,7 @@ the squash-merge.
   `docs/`.
 - Deps: R8b
 - Stages: execute
-- Status: execute
+- Status: done
 - Lead: executor
 - Accept: `uv run hive --version -> hive 2.0`; `uv build` produces `hive_queen-2.0*`;
   `test_package_name: pyproject name hive-queen, scripts hive = hive.cli:main, get_version
@@ -760,6 +762,8 @@ the squash-merge.
 - 2026-10-27 amend D-R6.9/D-R6.10 (R6 child plan): no `-c`; guard and feature switches live in `<queen>/.codex/{hooks.json,config.toml}`; a queen dir with `.codex/` shows the folder-trust prompt; folder and hook trust are one-time interactive approvals stored by Codex in ~/.codex/config.toml
 - 2026-10-27 R6: done (Claude and Codex queens; unit O OpenCode dropped by G1)
 - 2026-10-27 R7 (supervisor): release preparation dispatched to executor on release/2.0; tag, push and GitHub rename wait for the user
+- 2026-10-27 R7: done; release/2.0 prepared (dist hive-queen, get_version via hive-queen, uv.lock, install URL/package swaps, docs/upgrade.md, release procedure in docs/development.md, test_package_name; wheel hive_queen-2.0 prints `hive 2.0` from a scratch venv; pytest 715 passed; critic PASS); user confirmed; landed on main as cedba4b with --no-verify (VERSION 2.0), tag v2.0 pushed; deferred to the user: GitHub rename claude-rc-hive -> hive-queen (gh not installed), `git remote set-url` here, production upgrades here and on swarm (`uv tool uninstall hive && uv tool install git+https://github.com/sly2j/hive-queen`, `hive restart`, Codex queen re-trust), CI check on main
+- 2026-10-27 cleanup: 93 stale test tmux sockets removed here and `hive-test` on swarm, production listings unchanged; swarm test profile, Codex test trust entries and dev clone removal in progress per user request
 
 ## Todo
 
@@ -773,5 +777,5 @@ the squash-merge.
 - [x] R4 resume landed
 - [x] R6 child plan written, spikes passed (or blocked with Q2 answered), queen per system landed
 - [x] R8b docs polish landed
-- [ ] R7 release: VERSION 2.0, tag v2.0, rename, upgrade note, push (user confirms tag and push)
+- [x] R7 release: VERSION 2.0, tag v2.0, rename, upgrade note, push (user confirms tag and push)
 - [ ] Verification section passes; production hives unchanged on both machines
