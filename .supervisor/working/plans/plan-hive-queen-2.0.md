@@ -563,7 +563,7 @@ the squash-merge.
   `docs/multi-node.md`.
 - Deps: R0, R1a, R2
 - Stages: execute
-- Status: execute
+- Status: done
 - Lead: executor
 - Accept: `node_argv: node swarm profile test, [list] -> ssh -o BatchMode=yes -o
   ConnectTimeout=10 swarm -- '/home/u/.local/bin/hive --profile test list'` (shlex-quoted);
@@ -721,6 +721,7 @@ the squash-merge.
 - 2026-10-27 amend D18 (R6): OpenCode v2 key is `permissions` (plural, `{action,resource,effect}`); OpenCode queen must attach to the shared service; Codex queen runs in the default CODEX_HOME; Codex queen spike restored
 - 2026-10-27 risk: a Codex daemon started by `hive up` under systemd dies with the hive service; `up` re-ensures it
 - 2026-10-27 R1 (supervisor): Slices 1, 2, 4 dispatched to executor on feat/r1-claude-driver; Slices 5 (OpenCode) and 6 (Codex) blocked on user gate tests G1/G2
+- 2026-10-27 R5: done; `[[nodes]]` (name, host, hive, profile, description), global `hive --node NAME <cmd>` over `ssh -o BatchMode=yes` with exit passthrough, refuses attach/option injection/default-profile nodes from a named local profile, `hive nodes`, guard allows `--node NAME`, docs/multi-node.md; 506 tests green; local test profile drove the queen-less swarm test profile live, production panes unchanged on both machines; landed on main as b5136c0 (squash); lead decisions: `--node NAME` ends local option parsing, no `--profile` sent for default remote profile (older remote hives work); deferred: `hive nodes`/`--node` in docs/commands.md (R8b); note for R6: keep the guard's `--node` shift in guard_core; swarm dev clone is on feat/r5-nodes, check out main there after the next bundle
 
 ## Todo
 
