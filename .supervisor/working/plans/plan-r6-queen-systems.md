@@ -370,6 +370,10 @@ whose pass and fail paths are decided (D-R6.10).
 
 ## Log
 
+- 2026-10-27 R6 unit C (executor): spike on swarm Codex 0.164.0: project `.codex/hooks.json` in the queen dir keeps the pane on the shared daemon (no embedded-mode warning, `-a never -s danger-full-access` fine) but needs folder trust (`[projects]`) and hook trust stored as `[hooks.state."<key>"] trusted_hash` in the user's ~/.codex/config.toml, re-requested when the hook hash changes; stopped before hook trust per the safety contract, user config restored, panes unchanged on both machines
+- 2026-10-27 amend D-R6.10 (R6 child plan): a non-git queen dir with `.codex/` does show Codex's folder-trust prompt; "no trust prompt, hive seeds nothing" is wrong; seed_trust for the queen dir is acceptable
+- 2026-10-27 decision: user: allow Codex to persist the queen's folder and hook trust in ~/.codex/config.toml (one interactive "Trust all"; re-trust after guard changes is an accepted upgrade step); Codex queen ships; unit C resumed on feat/r6-codex-queen
+
 ## Todo
 
 - [x] Slice 1: `guard_core.py`, `claude/` layout, `queen.md` + `rules.md`, composed
