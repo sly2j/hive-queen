@@ -299,9 +299,9 @@ a "stop idle" command, queen per system (R6), pi.
 
 ## Todo
 
-- [ ] Slice 1: hook script, `activity.py`, `state_dir`, injection, `setup_pane` reset, Claude
+- [x] Slice 1: hook script, `activity.py`, `state_dir`, injection, `setup_pane` reset, Claude
       `hook_args` events, `list`/`status` fields, fake worker, unit tests, test-profile sequence
-- [ ] Slice 2: `docs/idle-detection.md`, queen bullet, real-Claude smoke
+- [x] Slice 2: `docs/idle-detection.md`, queen bullet, real-Claude smoke
 - [ ] Slice 3: OpenCode `poll_state` (if R1 Slice 5 landed)
 - [ ] Slice 4: Codex `hook_args` events (if R1 Slice 6 landed)
 - [ ] Q1 answered; token round run if yes

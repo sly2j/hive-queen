@@ -630,10 +630,12 @@ the squash-merge.
   the package returns blocked with Q2.
 - Owns: `hive/queen/*`, `hive/queen.py`, `hive/drivers/codex.py`, `hive/drivers/opencode.py`
   (`supports_queen`, `queen_extras`), `pyproject.toml` (package data), `tests/test_guard.py`,
-  `tests/test_queen.py`, `docs/queen.md`.
+  `tests/test_queen.py`, `docs/queen.md`, `hive/drivers/claude.py` (queen_files),
+  `tests/test_guard_opencode.py`, `tests/test_guard_codex.py`, pointer edits in `tests/test_cli.py`
+  (two materialize tests move to tests/test_queen.py) and `tests/test_split.py`.
 - Deps: R1, R3, R5
 - Stages: plan, execute
-- Status: plan
+- Status: execute
 - Lead: executor (child plan by planner: the spike protocol of D18 first)
 - Accept: spike first (Codex queen: allow `hive list`, deny `hive list; ls`, deny every Claude
   `ask` command; outcome recorded in the child plan's Log), then: `guard_core` tests pass for
@@ -643,7 +645,8 @@ the squash-merge.
   `queen_extras_per_system`. Validate: one real queen per supported system in the test hive with
   its config dir under the profile, `hive list` allowed, `hive list; ls` blocked, torn down in
   the same session.
-- Artifacts: plan-hive-queen-2.0-R6.md
+- Artifacts: .supervisor/working/plans/plan-r6-queen-systems.md
+- Landing: up to three squashes: Slices 1-3 after R4 lands; unit O after R1 Slice 5; unit C after R1 Slice 6 and R3 Slice 4.
 
 ### R8b: Docs polish for new users
 - Goal: README and every `docs/` page read as one coherent set with the 2.0 features and the
@@ -731,6 +734,10 @@ the squash-merge.
 - 2026-10-27 amend D16: `source` values hook|api|tmux; Claude hooks also UserPromptSubmit and StopFailure, Notification matcher adds agent_needs_input; SessionStart maps to done; status and screen files reset at launch; OpenCode by one-shot poll only (no SSE in R3)
 - 2026-10-27 amend D17: the OpenCode session id comes from `@hive_session` (R1 D-R1.6), not the status file; Codex from the status file unchanged
 - 2026-10-27 R3 (supervisor): Slices 1-2 dispatched to executor on feat/r3-done-detection; Slices 3-4 blocked on gates G1/G2
+- 2026-10-27 R3 (slices 1, 2): done; status hook + activity.py + --settings injection of 6 Claude events + state=/source=/age= in list and status + fake worker + docs/idle-detection.md + queen bullet; pytest 602 passed both commands; test-profile fake-worker sequence done/busy/done/blocked/quiet/dead passed, production panes unchanged; landed on main as e09c535 (squash); deferred: slices 3/4 (gated on R1 G1/G2), real-Claude --settings smoke moved to R4 step 0, Q1 token round (user-run), C1 single list-panes call (plan prescribes the extra call; optional RunningPane fields fix)
+- 2026-10-27 R6 (planner): child plan written at .supervisor/working/plans/plan-r6-queen-systems.md (Slices 1-3 ungated: guard_core + per-system layout, `--system` guard rule, Claude live check; units O OpenCode and C Codex gated on R1 Slices 5/6 with spike-first protocol D-R6.10); critic codex round 1 REVISE, round 2 PASS; decision: `hive spawn --system X` asks unless X is already a system in config.toml; Codex queen denies every Claude `ask` case with a run-by-hand message, rules-based prompts to roadmap; deferred: live checks to executor/user through the test profile, Codex spike needs the user's go-ahead (default CODEX_HOME)
+- 2026-10-27 roadmap candidate (from R6): Codex rules-based prompts (`-a on-request` + `.codex/rules`) replacing the Codex queen's deny-with-message (D-R6.11); curator adds at close-out
+- 2026-10-27 R6 (supervisor): execution of Slices 1-3 held until R4 lands (both edit the queen instruction file; the guard rule needs R4's final flag names)
 
 ## Todo
 
