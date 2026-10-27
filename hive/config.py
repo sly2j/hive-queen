@@ -23,11 +23,12 @@ PROFILE_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 TOP_KEYS = {"prefix", "session", "tmux_socket", "login_shell", "shell",
             "defaults", "env", "service", "agents", "search_roots", "queen",
-            "inspect_roots", "launchers"}
+            "inspect_roots", "launchers", "nodes"}
 DEFAULTS_KEYS = {"command", "launcher", "args", "system"}
 LAUNCHER_KEYS = {"name", "command", "config_dir", "description", "system"}
 LAUNCHER_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 AGENT_KEYS = {"type", "dir", "count", "indices", "command", "args", "env", "config_dir", "system"}
+NODE_KEYS = {"name", "host", "hive", "profile", "description"}
 QUEEN_KEYS = {"command", "args", "discover", "env", "config_dir", "enabled", "system"}
 TYPE_RE = re.compile(r"[A-Za-z0-9._-]+")
 # tmux rewrites or mis-targets names with these.
@@ -304,6 +305,46 @@ def parse_launchers(raw, default_system, path):
     return launchers
 
 
+def parse_nodes(raw, path):
+    """[[nodes]]: remote hives that `hive --node NAME` reaches over ssh (plan D8)."""
+    raw_nodes = raw.get("nodes", [])
+    check_type(raw_nodes, list, "nodes", path)
+    nodes = []
+    for i, entry in enumerate(raw_nodes, 1):
+        where = f"nodes[{i}]"
+        check_type(entry, dict, where, path)
+        check_keys(entry, NODE_KEYS, where, path)
+        for key in ("name", "host"):
+            if key not in entry:
+                raise ConfigError(f"{path}: {where} is missing required key '{key}'")
+        check_type(entry["name"], str, f"{where}.name", path)
+        if not LAUNCHER_NAME_RE.fullmatch(entry["name"]):
+            raise ConfigError(f"{path}: {where}.name '{entry['name']}' must match "
+                              f"{LAUNCHER_NAME_RE.pattern}")
+        if any(n["name"] == entry["name"] for n in nodes):
+            raise ConfigError(f"{path}: duplicate node name '{entry['name']}'")
+        host = entry["host"]
+        check_type(host, str, f"{where}.host", path)
+        # ssh reads a leading '-' as an option.
+        if not host or host.startswith("-") or re.search(r"\s", host):
+            raise ConfigError(f"{path}: {where}.host {host!r} must be non-empty, contain no "
+                              "whitespace and not start with '-'")
+        exe = entry.get("hive", "hive")
+        check_text(exe, f"{where}.hive", path)
+        profile = entry.get("profile")
+        if profile is not None:
+            check_type(profile, str, f"{where}.profile", path)
+            if profile != "default" and not PROFILE_RE.fullmatch(profile):
+                raise ConfigError(f"{path}: {where}.profile {profile!r} must match "
+                                  f"{PROFILE_RE.pattern} or be 'default'")
+        description = entry.get("description")
+        if description is not None:
+            check_type(description, str, f"{where}.description", path)
+        nodes.append({"name": entry["name"], "host": host, "hive": exe, "profile": profile,
+                      "description": description})
+    return nodes
+
+
 def parse_env(raw, path):
     env = raw.get("env", {})
     check_env(env, "env", path)
@@ -445,6 +486,7 @@ def parse_config():
 
     queen, discover = parse_queen(raw, default_command, default_args, system, path)
     agents = parse_agents(raw, default_command, default_args, system, path)
+    nodes = parse_nodes(raw, path)
 
     return {
         "prefix": prefix,
@@ -463,6 +505,7 @@ def parse_config():
         "launchers": launchers,
         "default_launcher": default_launcher,
         "system": system,
+        "nodes": nodes,
         "config_path": str(path),
     }
 

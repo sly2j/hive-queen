@@ -351,3 +351,36 @@ def test_is_private_leading_private_only_on_darwin(monkeypatch, platform, path, 
     spec.loader.exec_module(mod)
     monkeypatch.setattr(sys, "platform", platform)
     assert mod.is_private(path) is private
+
+
+# --- hive --node NAME (R5) --------------------------------------------------------
+
+@pytest.mark.parametrize("command", ["hive --node swarm list", "hive --node=swarm list",
+                                     "hive --node swarm stop api --index 2", "hive nodes",
+                                     "hive --node swarm --version"])
+def test_node_allowed(qdir, command):
+    assert bash(qdir, command) == (0, "")
+
+
+def test_node_down_asks(qdir):
+    assert asked(qdir, "hive --node swarm down") == (
+        "hive down stops the whole hive on node swarm, including its queen; approve to run it")
+
+
+def test_node_spawn_trust_asks(qdir):
+    write_config(qdir)
+    assert asked(qdir, "hive --node swarm spawn api --trust") == (
+        "hive spawn --trust grants workspace trust to api on node swarm; approve to run it")
+
+
+@pytest.mark.parametrize("command", ["hive --node swarm --profile x list",
+                                     "hive --node 'bad;name' list", "hive --node 'bad name' list",
+                                     "hive --node", "hive --node swarm -- down",
+                                     "hive --node swarm --node other list",
+                                     "hive --node=Bad list"])
+def test_node_blocked(qdir, command):
+    assert bash(qdir, command)[0] == 2
+
+
+def test_profile_still_blocked(qdir):
+    assert bash(qdir, "hive --profile x list")[0] == 2

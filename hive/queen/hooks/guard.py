@@ -2,7 +2,8 @@
 """PreToolUse guard for the hive queen. Managed by hive; do not edit.
 
 Only the QUEEN_TOOLS are allowed; any other tool (WebFetch, Agent, mcp__*, ...) is denied. Bash
-and Monitor: only a single `hive ...` command, no chaining, redirection or substitution, and no
+and Monitor: only a single `hive ...` command (optionally `hive --node NAME ...`, checked like the
+command it runs remotely), no chaining, redirection or substitution, and no
 argument under a secrets/private path. Of those, `hive spawn --command X` (also `--command=X`
 and argparse abbreviations such as `--comm`) runs without a prompt only when X is a command
 string from ../config.toml ([defaults] command or an [[agents]] command). Likewise each
@@ -34,6 +35,7 @@ DIALOG_TOOLS = {"AskUserQuestion"}
 QUEEN_TOOLS = {"Bash", "Monitor", "Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit"} | DIALOG_TOOLS
 PROTECTED_NAMES = (".claude", ".mcp.json", ".claude.json", "CLAUDE.md")
 PRIVATE_PARTS = {"secrets", "private"}
+NODE_RE = re.compile(r"[a-z0-9][a-z0-9-]*")  # hive's [[nodes]] name rule
 
 
 def block(reason):
@@ -159,10 +161,22 @@ def check_bash(command, qdir):
             if (is_private(os.path.expandvars(part))
                     or is_private(resolve(os.path.expandvars(part), qdir))):
                 block(f"guard: {part} is under a secrets/private path")
+    node = None
+    if len(tokens) > 1 and tokens[1].partition("=")[0] == "--node":
+        # `hive --node NAME CMD...` runs CMD on a remote hive: the same rules apply to CMD.
+        if "=" in tokens[1]:
+            node, rest = tokens[1].partition("=")[2], tokens[2:]
+        else:
+            node, rest = (tokens[2] if len(tokens) > 2 else ""), tokens[3:]
+        if not NODE_RE.fullmatch(node):
+            block(f"guard: --node {node!r} is not a node name ({NODE_RE.pattern})")
+        tokens = [tokens[0], *rest]
+    where = f" on node {node}" if node else ""
+    queen = "its" if node else "this"
     first = tokens[1] if len(tokens) > 1 else ""
     if first.startswith("-") and first not in ("--version", "-h", "--help"):
         # `hive -- down` parses as `hive down`; the checks below key on the subcommand.
-        block(BASH_REASON + " (no options before the subcommand)")
+        block(BASH_REASON + " (no options before the subcommand except --node NAME)")
     if len(tokens) > 1 and tokens[1] == "spawn":
         known = config_commands(qdir)
         reasons = [f"hive spawn --command is not a command from config.toml: {cmd}"
@@ -177,17 +191,18 @@ def check_bash(command, qdir):
             target = spawn_target(tokens[2:])
             reasons.append(f"hive spawn --trust grants workspace trust to {target}")
         if reasons:
-            ask("; ".join(reasons) + "; approve to run it")
+            ask("; ".join(reasons) + f"{where}; approve to run it")
     if len(tokens) > 1 and tokens[1] == "down":
-        ask("hive down stops the whole hive, including this queen; approve to run it")
+        ask(f"hive down stops the whole hive{where}, including {queen} queen; approve to run it")
     if len(tokens) > 1 and tokens[1] == "restart":
-        ask("hive restart stops and restarts the whole hive, including this queen; "
+        ask(f"hive restart stops and restarts the whole hive{where}, including {queen} queen; "
             "approve to run it")
     if len(tokens) > 2 and tokens[1] == "roots" and tokens[2] == "add":
-        ask(f"hive roots add changes the search roots: {' '.join(tokens[3:])}; approve to run it")
+        ask(f"hive roots add changes the search roots{where}: {' '.join(tokens[3:])}; "
+            "approve to run it")
     if len(tokens) > 2 and tokens[1] == "launchers" and tokens[2] == "add":
         # A registered launcher later runs through `spawn --launcher` without a --command prompt.
-        ask(f"hive launchers add registers a launch command: {' '.join(tokens[3:])}; "
+        ask(f"hive launchers add registers a launch command{where}: {' '.join(tokens[3:])}; "
             "approve to run it")
 
 

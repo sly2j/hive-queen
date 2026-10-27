@@ -12,7 +12,7 @@ import argparse
 import os
 import sys
 
-from hive import config, launchers, lifecycle, lock, roots, service, workers
+from hive import config, launchers, lifecycle, lock, nodes, roots, service, workers
 from hive.config import ConfigError
 from hive.paths import PathError
 from hive.util import die, get_version, warn
@@ -29,7 +29,7 @@ exit codes:
 COMMANDS = [("up", lifecycle), ("down", lifecycle), ("restart", lifecycle), ("status", lifecycle),
             ("attach", lifecycle), ("list", workers), ("spawn", workers), ("stop", workers),
             ("reconcile", lifecycle), ("launchers", launchers), ("discover", launchers),
-            ("dirs", roots), ("roots", roots), ("inspect-launcher", launchers), ("init", config),
+            ("dirs", roots), ("roots", roots), ("nodes", nodes), ("inspect-launcher", launchers), ("init", config),
             ("install-service", service), ("uninstall-service", service)]
 
 
@@ -42,6 +42,9 @@ def build_parser():
                         help="use the named profile <config dir>/hive/profiles/NAME (own config, "
                              "lock, queen dir, tmux socket hive-NAME, unit hive-NAME.service); "
                              "default: $HIVE_PROFILE, else the default profile")
+    parser.add_argument("--node", metavar="NAME",
+                        help="run the command on the remote hive of [[nodes]] NAME over ssh "
+                             "(BatchMode; attach is refused); see hive nodes")
     sub = parser.add_subparsers(dest="command")
     for name, module in COMMANDS:
         module.add_parser(sub, name)
@@ -52,10 +55,18 @@ LOCKED = ("up", "down", "spawn", "stop", "reconcile", "roots")
 
 
 def run():
+    remote = nodes.split_node_argv(sys.argv[1:])
+    if remote is not None:
+        # Proxied before any local config or lock: the remote hive parses the command.
+        name, config._profile_option, argv = remote
+        config.profile_name()
+        return nodes.run_remote(name, argv)
     parser = build_parser()
     args = parser.parse_args()
     config._profile_option = args.profile
     config.profile_name()  # an invalid name exits 2 before anything runs
+    if args.node is not None:
+        die("spell out --node NAME and put it before the subcommand")
     if args.command is None:
         parser.print_help()
         return 2
@@ -87,7 +98,8 @@ def run():
                 "spawn": workers.cmd_spawn, "stop": workers.cmd_stop,
                 "reconcile": lifecycle.cmd_reconcile, "discover": launchers.cmd_discover,
                 "inspect-launcher": launchers.cmd_inspect_launcher, "dirs": roots.cmd_dirs,
-                "roots": roots.cmd_roots, "launchers": launchers.cmd_launchers}
+                "roots": roots.cmd_roots, "launchers": launchers.cmd_launchers,
+                "nodes": nodes.cmd_nodes}
     return handlers[args.command](cfg, args)
 
 

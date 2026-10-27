@@ -25,6 +25,11 @@ The config file is `${XDG_CONFIG_HOME:-~/.config}/hive/config.toml`. Unknown key
 | `[[launchers]] command` | Required; must contain `{name}` and `--remote-control`. |
 | `[[launchers]] config_dir` | Optional absolute path (`~/` expanded): the Claude config dir the launcher uses; never exported. |
 | `[[launchers]] description` | Optional free text. |
+| `[[nodes]] name` | Required, unique, `[a-z0-9][a-z0-9-]*`: the `NAME` of `hive --node NAME`. See [Multi-node](multi-node.md). |
+| `[[nodes]] host` | Required ssh destination (an `~/.ssh/config` alias or `user@host`); no whitespace, no leading `-`. |
+| `[[nodes]] hive` | Optional remote hive executable, a single path or command name. Default: `hive`; a full path such as `/home/me/.local/bin/hive` is more robust. |
+| `[[nodes]] profile` | Optional remote profile name, or `default`. Default: the remote default profile. Required (and not `default`) when `--node` is used from a named local profile. |
+| `[[nodes]] description` | Optional free text. |
 | `[[agents]] type` | Required, unique, not `queen` or `hive-queen`; letters, digits, `.`, `_` and `-` only. Window name is `<type>-<machine>`, `<machine>` being `prefix`. |
 | `[[agents]] dir` | Required. Each pane starts with `cd <dir>`. If it does not exist, `up`, `restart` and `reconcile` skip that type's panes and start everything else, `hive list` marks the type `dir_missing=yes`, and `spawn` of that type is refused. |
 | `[[agents]] count` | Number of panes, integer >= 0. Default: 1. `0` keeps the entry (dir, command, comments) without panes. |

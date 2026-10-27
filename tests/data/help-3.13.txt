@@ -1,11 +1,11 @@
 === hive  --help
-usage: hive [-h] [--version] [--profile NAME]
-            {up,down,restart,status,attach,list,spawn,stop,reconcile,launchers,discover,dirs,roots,inspect-launcher,init,install-service,uninstall-service} ...
+usage: hive [-h] [--version] [--profile NAME] [--node NAME]
+            {up,down,restart,status,attach,list,spawn,stop,reconcile,launchers,discover,dirs,roots,nodes,inspect-launcher,init,install-service,uninstall-service} ...
 
 Run N instances of each agent kind in tmux panes.
 
 positional arguments:
-  {up,down,restart,status,attach,list,spawn,stop,reconcile,launchers,discover,dirs,roots,inspect-launcher,init,install-service,uninstall-service}
+  {up,down,restart,status,attach,list,spawn,stop,reconcile,launchers,discover,dirs,roots,nodes,inspect-launcher,init,install-service,uninstall-service}
     up                  start the session, or reconcile it with the config if running
     down                stop the session (and the hive tmux server if empty)
     restart             restart via systemd if the unit is active, else down + up
@@ -19,6 +19,7 @@ positional arguments:
     discover            run [queen] discover and print its output
     dirs                read-only: list directories under search_roots
     roots               show search_roots, or add/remove one (edits config)
+    nodes               list the remote nodes ([[nodes]]) that --node reaches
     inspect-launcher    read-only: show a launcher's CLAUDE_CONFIG_DIR evidence (files under
                         inspect_roots only)
     init                write an example config if none exists
@@ -31,6 +32,8 @@ options:
   --profile NAME        use the named profile <config dir>/hive/profiles/NAME (own config, lock,
                         queen dir, tmux socket hive-NAME, unit hive-NAME.service); default:
                         $HIVE_PROFILE, else the default profile
+  --node NAME           run the command on the remote hive of [[nodes]] NAME over ssh (BatchMode;
+                        attach is refused); see hive nodes
 
 exit codes:
   0  ok
@@ -188,6 +191,14 @@ positional arguments:
 
 options:
   -h, --help    show this help message and exit
+=== hive nodes --help
+usage: hive nodes [-h]
+
+List the [[nodes]] entries of config.toml. Run a command on a node with `hive --node NAME COMMAND
+...` (over ssh, BatchMode).
+
+options:
+  -h, --help  show this help message and exit
 === hive inspect-launcher --help
 usage: hive inspect-launcher [-h] COMMAND
 

@@ -24,7 +24,8 @@ DATA = Path(__file__).parent / "data"
 HELP_COMMANDS = [[], ["up"], ["down"], ["restart"], ["status"], ["attach"], ["list"], ["spawn"],
                  ["stop"], ["reconcile"], ["launchers"], ["launchers", "list"],
                  ["launchers", "add"], ["launchers", "default"], ["discover"], ["dirs"], ["roots"],
-                 ["inspect-launcher"], ["init"], ["install-service"], ["uninstall-service"]]
+                 ["nodes"], ["inspect-launcher"], ["init"], ["install-service"],
+                 ["uninstall-service"]]
 
 
 def help_text():

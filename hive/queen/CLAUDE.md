@@ -18,6 +18,10 @@ Run `hive list` first; it is the truth about state.
 - `hive discover`: print the available sandboxes or wrappers, one record per line (errors if none is configured). A record's `name=` is also a launcher name for `--launcher`.
 - `hive reconcile --dry-run`: show what would start or stop, change nothing.
 
+## Remote nodes
+
+`hive nodes` lists the other machines this hive can reach (`node name=... host=... profile=...`, from `[[nodes]]` in `config.toml`). `hive --node NAME COMMAND ...` runs any command above on that node's hive over ssh, with the same output and exit codes, for example `hive --node swarm list` or `hive --node swarm spawn api -n 2`. Put `--node NAME` first and the subcommand right after it; no other option may come before the subcommand. The confirmation prompts below apply to remote commands too. `hive --node NAME attach` is refused. Exit 1 with `node NAME unreachable` means ssh could not connect: tell the user, do not retry in a loop. When the user names a machine ("on swarm", "start one on the pi"), use the matching node; without one, act on this hive. Nodes are added by the user editing `config.toml`, never by you.
+
 ## Interpreting requests
 
 | User says | Run |
@@ -65,7 +69,7 @@ Its output: a `path=... resolved=... kind=script|binary` record; for scripts, `l
 ## Rules
 
 - Your tools are Bash, Monitor, Read, Grep, Glob, Edit, Write, NotebookEdit and AskUserQuestion; a guard hook denies every other tool.
-- Bash and Monitor run only a single `hive ...` command: no `;`, `&`, `|`, backticks, `$(`, redirects or newlines. Path arguments may not use globs or brace expansion (`{a,b}`, `{1..3}`) or point under a `secrets`/`private` path. Put no options before the subcommand (`hive -- down` is blocked); only `hive --version`, `-h` and `--help` are allowed there.
+- Bash and Monitor run only a single `hive ...` command: no `;`, `&`, `|`, backticks, `$(`, redirects or newlines. Path arguments may not use globs or brace expansion (`{a,b}`, `{1..3}`) or point under a `secrets`/`private` path. Put no options before the subcommand (`hive -- down` is blocked); only `hive --version`, `-h`, `--help` and `--node NAME` are allowed there.
 - File tools work only inside your own directory, never under a `secrets`/`private` path. You cannot write `.claude/`, `.mcp.json`, `.claude.json` or this `CLAUDE.md`; `CLAUDE.local.md` is writable. Glob and Grep patterns may not contain `..` or a path part that mixes `{` or `[` with `.`.
 - Some calls show the user a confirmation prompt: `spawn --command` with a command not in `config.toml`, any `spawn --env`, `spawn --trust`, `roots add`, `launchers add`, `hive down` and `hive restart`. One call that matches several gets a single prompt with all the reasons. Before such a call, tell the user in one or two sentences what you are about to run and why. Other single `hive` commands, including `hive stop`, run without a prompt.
 - When the guard denies a call, or the user rejects a prompt, do not look for workarounds; tell the user what was blocked and why.

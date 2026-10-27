@@ -556,3 +556,39 @@ def test_fixtures_name_a_socket():
     for name, text in texts.items():
         assert "tmux_socket" in text, name
     assert os.environ["TMUX_TMPDIR"].startswith("/tmp/hive-t-")
+
+
+# --- [[nodes]] (R5) -------------------------------------------------------------
+
+def test_nodes_parse_with_defaults(write):
+    write(BASE + '\n[[nodes]]\nname = "swarm"\nhost = "me@swarm"\n\n'
+          '[[nodes]]\nname = "pi-2"\nhost = "pi"\nhive = "/opt/hive"\nprofile = "test"\n'
+          'description = "lab"\n')
+    assert load_config()["nodes"] == [
+        {"name": "swarm", "host": "me@swarm", "hive": "hive", "profile": None, "description": None},
+        {"name": "pi-2", "host": "pi", "hive": "/opt/hive", "profile": "test", "description": "lab"}]
+
+
+def test_no_nodes_is_empty(write):
+    write(BASE)
+    assert load_config()["nodes"] == []
+
+
+@pytest.mark.parametrize("entry,error", [
+    ('host = "h"', "missing required key 'name'"),
+    ('name = "n"', "missing required key 'host'"),
+    ('name = "Bad"\nhost = "h"', "must match"),
+    ('name = "n"\nhost = "-oProxyCommand=x"', "not start with '-'"),
+    ('name = "n"\nhost = "a b"', "no whitespace"),
+    ('name = "n"\nhost = "h"\nhive = " "', "'nodes[1].hive' must not be empty"),
+    ('name = "n"\nhost = "h"\nprofile = "Bad!"', "nodes[1].profile"),
+    ('name = "n"\nhost = "h"\nport = 22', "unknown key 'port'"),
+])
+def test_node_validation(write, capsys, entry, error):
+    write(BASE + f"\n[[nodes]]\n{entry}\n")
+    fails(capsys, error)
+
+
+def test_duplicate_node_name(write, capsys):
+    write(BASE + '\n[[nodes]]\nname = "n"\nhost = "a"\n\n[[nodes]]\nname = "n"\nhost = "b"\n')
+    fails(capsys, "duplicate node name 'n'")

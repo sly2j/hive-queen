@@ -15,7 +15,6 @@ PENDING_PAGES = {
     "docs/test-profile.md",
     "docs/idle-detection.md",
     "docs/resume.md",
-    "docs/multi-node.md",
     "docs/upgrade.md",
 }
 PENDING_DIRS = ("docs/systems/",)
