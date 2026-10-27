@@ -126,7 +126,10 @@ def test_lifecycle(hive, tmp_path):
     h.tmux("send-keys", "-t", a2, "-l", "Do you trust the files in this folder?")
     for _ in range(50):
         out = h.run("list").stdout.splitlines()
-        if f"pane name=a-t-2 type=a id={a2} system=claude waiting=trust" in out:
+        # the appended flags make `sleep` exit, so the tmux fallback says dead
+        if any(line.startswith(f"pane name=a-t-2 type=a id={a2} system=claude state=dead "
+                               "source=tmux age=") and line.endswith(" waiting=trust")
+               for line in out):
             break
         time.sleep(0.1)
     else:

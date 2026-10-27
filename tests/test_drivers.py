@@ -30,13 +30,18 @@ def test_hook_args_claude():
     args = claude.hook_args(["python3", "/x y/hook.py"], "/tmp/state.json")
     assert args[0] == "--settings"
     hooks = json.loads(args[1])["hooks"]
-    assert set(hooks) == {"SessionStart", "Stop", "Notification", "SessionEnd"}
-    expected = shlex.join(["python3", "/x y/hook.py", "/tmp/state.json"])
+    assert set(hooks) == {"SessionStart", "UserPromptSubmit", "Stop", "StopFailure",
+                          "Notification", "SessionEnd"}
     for ev, entries in hooks.items():
         (entry,) = entries
+        expected = shlex.join(["python3", "/x y/hook.py", "/tmp/state.json", "--event", ev])
         assert entry["hooks"] == [{"type": "command", "command": expected}]
-        assert entry.get("matcher") == ("permission_prompt|idle_prompt"
+        assert entry.get("matcher") == ("permission_prompt|idle_prompt|agent_needs_input"
                                         if ev == "Notification" else None)
+
+
+def test_poll_state_claude():
+    assert claude.poll_state({}, "abc") is None
 
 
 def test_waiting_kind_theme():

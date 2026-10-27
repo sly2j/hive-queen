@@ -75,13 +75,19 @@ class ClaudeDriver:
         return ["--resume", session_id]
 
     def hook_args(self, hook_cmd, state_file):
-        """--settings JSON wiring the lifecycle hooks to `hook_cmd <state_file>`."""
-        entry = {"hooks": [{"type": "command",
-                            "command": shlex.join([*hook_cmd, str(state_file)])}]}
-        events = ("SessionStart", "Stop", "Notification", "SessionEnd")
-        settings = {"hooks": {ev: [dict(entry)] for ev in events}}
-        settings["hooks"]["Notification"][0]["matcher"] = "permission_prompt|idle_prompt"
+        """--settings JSON wiring each lifecycle event to `hook_cmd <state_file> --event <name>`."""
+        events = ("SessionStart", "UserPromptSubmit", "Stop", "StopFailure", "Notification",
+                  "SessionEnd")
+        settings = {"hooks": {
+            ev: [{"hooks": [{"type": "command",
+                             "command": shlex.join([*hook_cmd, str(state_file), "--event", ev])}]}]
+            for ev in events}}
+        settings["hooks"]["Notification"][0]["matcher"] = (
+            "permission_prompt|idle_prompt|agent_needs_input")
         return ["--settings", json.dumps(settings)]
+
+    def poll_state(self, env, session_id):
+        return None  # Claude has no API to poll; the hook status file is its source
 
     def prepare_launch(self, env, pane):
         return None  # hive's own uuid4 is the session id

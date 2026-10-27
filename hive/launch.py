@@ -6,6 +6,7 @@ import re
 import shlex
 import shutil
 
+from hive.activity import hook_cmd, status_file
 from hive.drivers import DEFAULT_SYSTEM, get_driver
 from hive.drivers.common import version_tuple
 from hive.util import ConfigError, warn
@@ -42,21 +43,25 @@ def expand_command(command, args, **values):
 
 def expand_pane(cfg, pane, session_id=None):
     """The pane's command line. With a session id, {session_id} is expanded; when neither the
-    command nor an arg has it, the driver's session args are appended. Without one, nothing is
-    appended and {session_id} stays literal (lifecycle prints, preflight).
+    command nor an arg has it, the driver's session args are appended; the driver's status-hook
+    flags are always appended. Without one, nothing is appended and {session_id} stays literal
+    (lifecycle prints, preflight).
 
-    A `sh -c '...'` wrapper must carry {session_id} inside its quotes: an appended flag would
-    become the wrapper's $0.
+    A `sh -c '...'` wrapper must pass appended flags through: `sh -c '... exec claude "$@"' sh`;
+    otherwise they become its $0, and {session_id} must sit inside its quotes.
     """
     values = dict(name=pane.name, type=pane.type, index=pane.index, dir=pane.dir,
                   prefix=cfg["prefix"])
     if session_id is None:
         return expand_command(pane.command, pane.args, **values)
     command = expand_command(pane.command, pane.args, session_id=session_id, **values)
-    if "{session_id}" in pane.command or any("{session_id}" in a for a in pane.args):
-        return command
-    extra = " ".join(shlex.quote(a) for a in get_driver(pane.system).session_args(session_id))
-    return f"{command} {extra}" if extra else command
+    driver = get_driver(pane.system)
+    extra = []
+    if not ("{session_id}" in pane.command or any("{session_id}" in a for a in pane.args)):
+        extra += driver.session_args(session_id)
+    extra += driver.hook_args(hook_cmd(), status_file(cfg, pane.name))
+    quoted = " ".join(shlex.quote(a) for a in extra)
+    return f"{command} {quoted}" if quoted else command
 
 
 def check_launcher_command(command, where, system=DEFAULT_SYSTEM):

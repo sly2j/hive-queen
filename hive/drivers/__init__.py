@@ -31,6 +31,7 @@ class Driver(Protocol):
     def session_args(self, session_id): ...  # flags that start a session with this id
     def resume_args(self, session_id): ...  # flags that resume that session
     def hook_args(self, hook_cmd, state_file): ...  # flags wiring lifecycle hooks to state_file
+    def poll_state(self, env, session_id): ...  # current state from the system's own API, else None
     def prepare_launch(self, env, pane): ...  # session id the system chose itself, else None
     def queen_extras(self, command, args): ...  # command plus the queen's restricting flags
 

@@ -630,3 +630,17 @@ def test_system_precedence_in_config(write, fake_driver):
     cfg = load_config()
     assert cfg["launchers"][0]["system"] == "fake"
     assert {a["type"]: a["system"] for a in cfg["agents"]} == {"a": "fake", "b": "claude"}
+
+
+def test_state_dir_in_cfg_and_lenient_cfg(profile, tmp_path):
+    from hive.config import lenient_config
+    write_profile(tmp_path, "t", BASE)
+    profile("t")
+    pdir = tmp_path / "hive" / "profiles" / "t"
+    assert load_config()["state_dir"] == str(pdir / "state")
+    (pdir / "config.toml").write_text("prefix = \"t\"\n[[[ broken")
+    cfg, problem = lenient_config()
+    assert problem and cfg["state_dir"] == str(pdir / "state")
+    profile("default")
+    (tmp_path / "hive" / "config.toml").write_text("prefix = \"t\"\n[[[ broken")
+    assert lenient_config()[0]["state_dir"] == str(tmp_path / "hive" / "state")

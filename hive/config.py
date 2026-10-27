@@ -231,7 +231,8 @@ def lenient_config():
     sock = pick("tmux_socket", f"hive-{profile}" if profile else DEFAULT_SOCKET, check_socket)
     refuse_socket_collision(sock, path)
     return ({"prefix": prefix, "session": session, "socket": sock, "profile": profile,
-             "pane_shell": None, "env": {}, "agents": [], "config_path": str(path)},
+             "pane_shell": None, "env": {}, "agents": [], "config_path": str(path),
+             "state_dir": str(profile_dir() / "state")},
             f"{problem}\n  using session {session} on socket {sock} (from the parsable lines "
             "of the config, else the defaults)")
 
@@ -513,6 +514,7 @@ def parse_config():
         "system": system,
         "nodes": nodes,
         "config_path": str(path),
+        "state_dir": str(profile_dir() / "state"),
     }
 
 

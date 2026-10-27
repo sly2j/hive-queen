@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from hive import tmux
+from hive.activity import pane_map, pane_state, state_fields
 from hive.config import (TYPE_RE, ConfigError, check_config_writable, edit_config,
                          expand_config_dir, load_config)
 from hive.configedit import ENV_KEY_RE, append_agent, set_indices
@@ -44,12 +45,19 @@ def cmd_list(cfg, args):
               f"system={agent['system']}"
               + ("" if Path(agent["dir"]).is_dir() else " dir_missing=yes"))
     systems = {"queen": cfg["queen"]["system"], **{a["type"]: a["system"] for a in cfg["agents"]}}
+    panes = pane_map(cfg)
+    facts = pane_facts(cfg) if running else {}
     for r in running.values():
         screen = tmux.tmux(cfg, "capture-pane", "-p", "-t", r.pane_id, check=False).stdout
-        system = systems.get(r.type, cfg["system"])
+        pane = panes.get(r.name)
+        system = pane.system if pane else systems.get(r.type, cfg["system"])
+        env = {**cfg["env"], **pane.env} if pane else {}
+        command, session_id = facts.get(r.pane_id, ("", None))
+        state = pane_state(cfg, r.name, system, env, session_id, command, screen)
         kind = get_driver(system).waiting_kind(screen)
         waiting = f" waiting={kind}" if kind else ""
-        print(f"pane name={r.name} type={r.type} id={r.pane_id} system={system}{waiting}")
+        print(f"pane name={r.name} type={r.type} id={r.pane_id} system={system} "
+              f"{state_fields(state)}{waiting}")
     for u in unmanaged:
         print(f"unmanaged pane={u['pane']} window={u['window']} title={quote(u['title'])}")
     if up:
@@ -60,6 +68,17 @@ def cmd_list(cfg, args):
     print(f"search_roots={','.join(cfg['search_roots'])}")
     print(f"discover={cfg['discover'] or ''}")
     return 0
+
+
+def pane_facts(cfg):
+    """{pane_id: (pane_current_command, @hive_session or None)}, in one list-panes call."""
+    fmt = "#{pane_id}\t#{pane_current_command}\t#{@hive_session}"
+    out = tmux.tmux(cfg, "list-panes", "-s", "-t", "=" + cfg["session"], "-F", fmt)
+    facts = {}
+    for line in out.stdout.splitlines():
+        pane_id, command, session_id = (line.split("\t", 2) + ["", ""])[:3]
+        facts[pane_id] = (command, session_id or None)
+    return facts
 
 
 def sparse_field(indices):

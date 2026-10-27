@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import uuid
 
+from hive.activity import reset_status
 from hive.drivers import DRIVERS, get_driver
 from hive.launch import expand_pane
 from hive.reconcile import RunningPane, desired_panes, parse_legacy_name, parse_name, queen_name
@@ -100,6 +101,7 @@ def setup_pane(cfg, pane, pane_id):
     tmux(cfg, "set-option", "-p", "-t", pane_id, "@hive_name", pane.name)
     if driver.assigns_session_id:
         tmux(cfg, "set-option", "-p", "-t", pane_id, "@hive_session", session_id)
+    reset_status(cfg, pane.name)  # a new launch never shows the previous one's state
     tmux(cfg, "send-keys", "-t", pane_id, "-l",
          shell_line(cfg, pane.dir, expand_pane(cfg, pane, session_id), pane.env))
     tmux(cfg, "send-keys", "-t", pane_id, "Enter")

@@ -76,6 +76,9 @@ class FakeDriver:
     def hook_args(self, hook_cmd, state_file):
         return []
 
+    def poll_state(self, env, session_id):
+        return None
+
     def prepare_launch(self, env, pane):
         return None
 

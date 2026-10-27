@@ -8,6 +8,7 @@ import json
 import os
 import stat
 import sys
+import time
 import tomllib
 from importlib import resources
 from types import SimpleNamespace
@@ -349,7 +350,7 @@ def test_status_survives_a_tab_in_the_pane_title(env, monkeypatch, capsys):
         def __call__(self, cfg, *args, check=True):
             if args[0] == "list-panes":
                 return SimpleNamespace(returncode=0, stderr="",
-                                       stdout="0\twin\t0\tsleep\ta\ttitle\twith\ttabs\n")
+                                       stdout="0\twin\t0\tsleep\t%1\t\t\ta\ttitle\twith\ttabs\n")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
     monkeypatch.setattr("hive.tmux.tmux", Tmux())
     code, out, _ = hive(monkeypatch, capsys, "status")
@@ -760,21 +761,30 @@ def test_stop_instance_of_dot_type(env, monkeypatch, capsys):
 # --- agent systems: list, spawn --system, launchers, inspect-launcher (R1) -----------------
 
 class ScreenTmux(FakeTmux):
-    """capture-pane returns `screen`."""
-    def __init__(self, screen=""):
+    """capture-pane returns `screen`; list-panes answers the state columns of pane %5."""
+    def __init__(self, screen="", command="node", session_id=""):
         super().__init__()
         self.screen = screen
+        self.command = command
+        self.session_id = session_id
 
     def __call__(self, cfg, *args, check=True):
         super().__call__(cfg, *args, check=check)
-        out = self.screen if args[0] == "capture-pane" else "%1\n"
+        if args[0] == "capture-pane":
+            out = self.screen
+        elif args[0] == "list-panes":
+            out = f"%5\t{self.command}\t{self.session_id}\n"
+        else:
+            out = "%1\n"
         return SimpleNamespace(returncode=0, stdout=out, stderr="")
 
 
-def list_with_pane(env, monkeypatch, capsys, screen):
+def list_with_pane(env, monkeypatch, capsys, screen, command="node"):
     agents_cfg(env, ("a", "count = 1"))
     monkeypatch.setattr("hive.tmux.session_running", lambda cfg: True)
-    monkeypatch.setattr("hive.tmux.tmux", ScreenTmux(screen))
+    fake = ScreenTmux(screen, command)
+    monkeypatch.setattr("hive.tmux.tmux", fake)
+    list_with_pane.fake = fake
     pane = RunningPane("%5", "@0", "a-t", "a-t-1", "a", 1, False)
     monkeypatch.setattr("hive.tmux.running_panes", lambda cfg: ({"a-t-1": pane}, []))
     code, out, _ = hive(monkeypatch, capsys, "list")
@@ -801,14 +811,65 @@ def test_list_dir_missing_stays_last(env, monkeypatch, capsys):
 
 def test_list_waiting_kind(env, monkeypatch, capsys):
     lines = list_with_pane(env, monkeypatch, capsys, "Select login method:\n")
-    assert "pane name=a-t-1 type=a id=%5 system=claude waiting=login" in lines
+    assert "pane name=a-t-1 type=a id=%5 system=claude state=busy source=tmux age=0 waiting=login" in lines
 
 
 def test_list_waiting_trust_unchanged(env, monkeypatch, capsys):
     lines = list_with_pane(env, monkeypatch, capsys, "Do you trust the files in this folder?\n")
-    assert "pane name=a-t-1 type=a id=%5 system=claude waiting=trust" in lines
+    assert "pane name=a-t-1 type=a id=%5 system=claude state=busy source=tmux age=0 waiting=trust" in lines
     lines = list_with_pane(env, monkeypatch, capsys, "all quiet\n")
-    assert "pane name=a-t-1 type=a id=%5 system=claude" in lines
+    assert "pane name=a-t-1 type=a id=%5 system=claude state=busy source=tmux age=0" in lines
+
+
+def test_list_prints_state_source_age(env, monkeypatch, capsys):
+    status = env.xdg / "hive" / "state" / "status" / "a-t-1.json"
+    status.parent.mkdir(parents=True)
+    status.write_text(json.dumps({"state": "done", "ts": time.time() - 5}))
+    lines = list_with_pane(env, monkeypatch, capsys, "all quiet\n")
+    line = next(x for x in lines if x.startswith("pane "))
+    assert "system=claude state=done source=hook age=" in line
+    age = int(line.split(" age=")[1].split()[0])
+    assert 4 <= age <= 8
+    calls = [c[0] for c in list_with_pane.fake.calls]
+    assert calls.count("capture-pane") == 1
+
+
+def test_list_tmux_dead(env, monkeypatch, capsys):
+    lines = list_with_pane(env, monkeypatch, capsys, "$ \n", command="bash")
+    assert any(x.startswith("pane ") and " state=dead source=tmux " in x for x in lines)
+
+
+def status_tmux(monkeypatch, listing, screen="working\n"):
+    class Tmux(FakeTmux):
+        def __call__(self, cfg, *args, check=True):
+            super().__call__(cfg, *args, check=check)
+            out = listing if args[0] == "list-panes" else screen if args[0] == "capture-pane" else ""
+            return SimpleNamespace(returncode=0, stdout=out, stderr="")
+    fake = Tmux()
+    monkeypatch.setattr("hive.tmux.tmux", fake)
+    return fake
+
+
+def test_status_prints_state(env, monkeypatch, capsys):
+    agents_cfg(env, ("a", "count = 1"))
+    fake = status_tmux(monkeypatch, "0\tw\t0\tnode\t%5\ta-t-1\t\ttitle\n"
+                       "0\tw\t1\tvim\t%6\t\t\tother\n")
+    code, out, _ = hive(monkeypatch, capsys, "status")
+    assert code == 0
+    assert "    pane 0: title  (node)  state=busy source=tmux age=0\n" in out
+    assert "    pane 1: other  (vim)\n" in out
+    assert [c[0] for c in fake.calls].count("capture-pane") == 1
+
+
+def test_status_lenient_config_prints_state(env, monkeypatch, capsys):
+    status = env.xdg / "hive" / "state" / "status" / "a-t-1.json"
+    status.parent.mkdir(parents=True)
+    status.write_text(json.dumps({"state": "blocked", "ts": time.time()}))
+    env.cfg.write_text(BASE + "\nbogus = 1\n")
+    status_tmux(monkeypatch, "0\tw\t0\tnode\t%5\ta-t-1\t\ttitle\n")
+    code, out, _ = hive(monkeypatch, capsys, "status")
+    assert code == 0
+    assert "    pane 0: title  (node)  state=blocked source=hook age=0\n" in out
 
 
 def spawn_dir(env):

@@ -1,7 +1,9 @@
 """Launcher args: config, placement in the command, configedit, and hive spawn --arg."""
 
 import os
+import json
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -12,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from hive.activity import screen_file, status_file
 from hive.config import load_config
 from hive.drivers import get_driver
 from hive.drivers.claude import QUEEN_TOOLS
@@ -346,6 +349,11 @@ class RecordingTmux:
         return [a[-1] for a in self.calls if a[0] == "set-option" and "@hive_session" in a]
 
 
+def bare(line):
+    """The command line without the appended --settings hook flags."""
+    return line.split(" --settings ")[0]
+
+
 def agent_pane(write, tmp_path):
     write(BASE + agent(dir_=str(tmp_path)))
     cfg = load_config()
@@ -355,21 +363,22 @@ def agent_pane(write, tmp_path):
 def test_session_id_placeholder(write, tmp_path):
     cfg, pane = agent_pane(write, tmp_path)
     pane = replace(pane, command="claude -n {name} --session-id {session_id}")
-    assert expand_pane(cfg, pane, "abc") == "claude -n a-t-1 --session-id abc"
+    assert bare(expand_pane(cfg, pane, "abc")) == "claude -n a-t-1 --session-id abc"
 
 
 def test_session_id_placeholder_in_args(write, tmp_path):
     cfg, pane = agent_pane(write, tmp_path)
     pane = replace(pane, args=["--session-id={session_id}"])
-    assert expand_pane(cfg, pane, "abc") == "claude -n a-t-1 --remote-control a-t-1 --session-id=abc"
+    assert bare(expand_pane(cfg, pane, "abc")) == (
+        "claude -n a-t-1 --remote-control a-t-1 --session-id=abc")
 
 
 def test_session_args_appended_when_absent(write, tmp_path):
     cfg, pane = agent_pane(write, tmp_path)
-    assert expand_pane(cfg, pane, "abc") == (
+    assert bare(expand_pane(cfg, pane, "abc")) == (
         "claude -n a-t-1 --remote-control a-t-1 --session-id abc")
     pane = replace(pane, args=["--fable"])
-    assert expand_pane(cfg, pane, "abc").endswith("--fable --session-id abc")
+    assert bare(expand_pane(cfg, pane, "abc")).endswith("--fable --session-id abc")
 
 
 def test_expand_pane_without_id_appends_nothing(write, tmp_path):
@@ -377,6 +386,49 @@ def test_expand_pane_without_id_appends_nothing(write, tmp_path):
     assert expand_pane(cfg, pane) == "claude -n a-t-1 --remote-control a-t-1"
     pane = replace(pane, command="claude --session-id {session_id}")
     assert expand_pane(cfg, pane) == "claude --session-id {session_id}"
+
+
+def test_expand_pane_appends_hook_flags(write, tmp_path):
+    cfg, pane = agent_pane(write, tmp_path)
+    words = shlex.split(expand_pane(cfg, pane, "abc"))
+    assert words[-4:-2] == ["--session-id", "abc"] and words[-2] == "--settings"
+    hooks = json.loads(words[-1])["hooks"]
+    assert set(hooks) == {"SessionStart", "UserPromptSubmit", "Stop", "StopFailure",
+                          "Notification", "SessionEnd"}
+    status = str(status_file(cfg, pane.name))
+    for ev, entries in hooks.items():
+        command = entries[0]["hooks"][0]["command"]
+        assert status in command and command.endswith(f"--event {ev}")
+
+
+def test_expand_pane_print_path_unchanged(write, tmp_path):
+    cfg, pane = agent_pane(write, tmp_path)
+    assert "--settings" not in expand_pane(cfg, pane)
+
+
+def test_hook_args_passed_on_every_launch(write, tmp_path):
+    cfg, pane = agent_pane(write, tmp_path)
+    pane = replace(pane, args=["--resume", "old-id"])
+    words = shlex.split(expand_pane(cfg, pane, "new-id"))
+    assert "--resume" in words and "--settings" in words
+
+
+def test_setup_pane_resets_status(write, tmp_path, monkeypatch):
+    cfg, pane = agent_pane(write, tmp_path)
+    files = [status_file(cfg, pane.name), screen_file(cfg, pane.name)]
+    for f in files:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("{}")
+    seen = []
+
+    def fake(cfg, *args, check=True):
+        if args[0] == "send-keys":
+            seen.append([f.exists() for f in files])
+        return SimpleNamespace(returncode=0, stdout="%1\n", stderr="")
+
+    monkeypatch.setattr("hive.tmux.tmux", fake)
+    setup_pane(cfg, pane, "%1")
+    assert seen and all(s == [False, False] for s in seen)
 
 
 def test_uuid_per_pane(write, tmp_path, monkeypatch):
@@ -387,7 +439,7 @@ def test_uuid_per_pane(write, tmp_path, monkeypatch):
     assert ids[0] != ids[1] and all(re.fullmatch(UUID4, i) for i in ids)
     assert fake.sessions() == ids
     for typed, i in zip(fake.typed(), ids):
-        assert typed.endswith(f"--session-id {i}")
+        assert bare(typed).endswith(f"--session-id {i}")
 
 
 def test_first_pane_gets_session(write, tmp_path, monkeypatch):
@@ -403,7 +455,7 @@ def test_first_pane_gets_session(write, tmp_path, monkeypatch):
     (sid,) = fake.sessions()
     assert re.fullmatch(UUID4, sid)
     assert ("set-option", "-p", "-t", "%1", "@hive_session", sid) in fake.calls
-    assert fake.typed()[0].endswith(f"--session-id {sid}")
+    assert bare(fake.typed()[0]).endswith(f"--session-id {sid}")
 
 
 def test_later_pane_gets_session(write, tmp_path, monkeypatch):

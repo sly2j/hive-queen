@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from hive import tmux
+from hive.activity import pane_map, pane_state, state_fields
 from hive.launch import expand_pane, preflight, warn_untrusted
 from hive.lock import hold_lock
 from hive.queen import materialize_queen
@@ -153,16 +154,26 @@ def cmd_status(cfg, args):
         print("not running")
         return 1
     # pane_title last: it is the only field a program can put a tab in.
-    fmt = "#{window_index}\t#{window_name}\t#{pane_index}\t#{pane_current_command}\t#{pane_title}"
+    fmt = ("#{window_index}\t#{window_name}\t#{pane_index}\t#{pane_current_command}\t#{pane_id}"
+           "\t#{@hive_name}\t#{@hive_session}\t#{pane_title}")
     out = tmux.tmux(cfg, "list-panes", "-s", "-t", "=" + cfg["session"], "-F", fmt)
     print(f"session {cfg['session']}")
+    panes = pane_map(cfg)
     current_window = None
     for line in out.stdout.splitlines():
-        _, window, pane_index, running, title = line.split("\t", 4)
+        _, window, pane_index, running, pane_id, name, session_id, title = line.split("\t", 7)
         if window != current_window:
             print(f"  {window}")
             current_window = window
-        print(f"    pane {pane_index}: {title}  ({running})")
+        text = f"    pane {pane_index}: {title}  ({running})"
+        if name:
+            screen = tmux.tmux(cfg, "capture-pane", "-p", "-t", pane_id, check=False).stdout
+            pane = panes.get(name)
+            env = {**cfg.get("env", {}), **pane.env} if pane else {}
+            state = pane_state(cfg, name, pane.system if pane else "claude", env,
+                               session_id or None, running, screen)
+            text += "  " + state_fields(state)
+        print(text)
     print(f"attach: tmux -L {cfg['socket']} attach -t {cfg['session']}")
     return 0
 
