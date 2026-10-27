@@ -12,6 +12,8 @@ import tomllib
 
 HEADER_RE = re.compile(r"^\s*\[\[\s*agents\s*\]\]\s*(#.*)?$")
 COUNT_RE = re.compile(r"^(\s*count\s*=\s*)\d+")
+COUNT_KEY_RE = re.compile(r"^\s*count\s*=")
+INDICES_KEY_RE = re.compile(r"^\s*indices\s*=")
 KEY_RE = re.compile(r"^\s*[A-Za-z0-9_\"'-]+\s*=")
 ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -50,27 +52,64 @@ def agent_blocks(lines):
         yield start, len(lines)
 
 
+def agent_block(lines, type_):
+    """The (start, end) line range of the [[agents]] block with this type."""
+    type_re = re.compile(r"^\s*type\s*=\s*([\"'])" + re.escape(type_) + r"\1")
+    for start, end in agent_blocks(lines):
+        if any(type_re.match(line) for line in lines[start:end]):
+            return start, end
+    raise EditError(f"no [[agents]] block with type '{type_}'")
+
+
+def _insert_key(lines, start, end, line):
+    """Insert `line` after the block's last key line."""
+    last = max(i for i in range(start, end) if KEY_RE.match(lines[i]))
+    if lines[last].endswith(("\n", "\r")):
+        eol = lines[last][len(lines[last].rstrip("\r\n")):]
+        lines.insert(last + 1, f"{line}{eol}")
+    else:
+        # last line of a file without trailing newline: keep it that way
+        lines[last] += "\n"
+        lines.insert(last + 1, line)
+    return "".join(lines)
+
+
 def set_count(text, type_, n):
     lines = text.splitlines(keepends=True)
     check_inline(lines)
-    type_re = re.compile(r"^\s*type\s*=\s*([\"'])" + re.escape(type_) + r"\1")
-    for start, end in agent_blocks(lines):
-        if not any(type_re.match(line) for line in lines[start:end]):
-            continue
-        for i in range(start, end):
-            if COUNT_RE.match(lines[i]):
-                lines[i] = COUNT_RE.sub(lambda m: m.group(1) + str(n), lines[i], count=1)
-                return "".join(lines)
-        last = max(i for i in range(start, end) if KEY_RE.match(lines[i]))
-        if lines[last].endswith(("\n", "\r")):
-            eol = lines[last][len(lines[last].rstrip("\r\n")):]
-            lines.insert(last + 1, f"count = {n}{eol}")
-        else:
-            # last line of a file without trailing newline: keep it that way
-            lines[last] += "\n"
-            lines.insert(last + 1, f"count = {n}")
-        return "".join(lines)
-    raise EditError(f"no [[agents]] block with type '{type_}'")
+    start, end = agent_block(lines, type_)
+    for i in range(start, end):
+        if COUNT_RE.match(lines[i]):
+            lines[i] = COUNT_RE.sub(lambda m: m.group(1) + str(n), lines[i], count=1)
+            return "".join(lines)
+    return _insert_key(lines, start, end, f"count = {n}")
+
+
+def set_indices(text, type_, indices):
+    """Store a type's instance numbers (D6): `count = N` when they are 1..N, else
+    `indices = [..]`. The line of the other key is removed."""
+    indices = sorted(indices)
+    lines = text.splitlines(keepends=True)
+    check_inline(lines)
+    start, end = agent_block(lines, type_)
+
+    def is_key(line):
+        return COUNT_KEY_RE.match(line) or INDICES_KEY_RE.match(line)
+
+    if indices == list(range(1, len(indices) + 1)):
+        if not any(INDICES_KEY_RE.match(x) for x in lines[start:end]):
+            return set_count(text, type_, len(indices))  # keeps the count line's comment
+        new = f"count = {len(indices)}"
+    else:
+        new = f"indices = [{', '.join(map(str, indices))}]"
+    keys = [i for i in range(start, end) if is_key(lines[i])]
+    if not keys:
+        return _insert_key(lines, start, end, new)
+    first = lines[keys[0]]
+    lines[keys[0]] = new + first[len(first.rstrip("\r\n")):]
+    for i in reversed(keys[1:]):
+        del lines[i]
+    return "".join(lines)
 
 
 def append_agent(text, type_, dir_, count, command=None, env=None, config_dir=None,

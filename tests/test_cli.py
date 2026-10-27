@@ -621,3 +621,137 @@ def test_list_queen_disabled(env, monkeypatch, capsys):
     assert code == 0 and lines[1].startswith("queen name=hive-queen-t running=yes")
     assert lines[1].endswith(" enabled=no")
     assert "drift start=none stop=hive-queen-t" in lines
+
+
+# --- per-instance removal (R2, D6) ---------------------------------------------
+
+def agents_cfg(env, *blocks):
+    (env.tmp / "a").mkdir(exist_ok=True)
+    text = BASE + "".join(f'\n[[agents]]\ntype = "{t}"\ndir = "{env.tmp / "a"}"\n{extra}\n'
+                          for t, extra in blocks)
+    env.cfg.write_text(text)
+
+
+def agent_entry(env, kind):
+    import tomllib
+    return next(a for a in tomllib.loads(env.cfg.read_text())["agents"] if a["type"] == kind)
+
+
+def test_parse_indices_and_count_exclusive(env, monkeypatch, capsys):
+    agents_cfg(env, ("a", "count = 2\nindices = [2]"))
+    code, _, err = hive(monkeypatch, capsys, "list")
+    assert code == 2 and "agents[1] has both 'count' and 'indices'" in err
+
+
+@pytest.mark.parametrize("value", ["[0]", "[2, 2]", "[true]", '["2"]', "2"])
+def test_parse_indices_invalid(env, monkeypatch, capsys, value):
+    agents_cfg(env, ("a", f"indices = {value}"))
+    code, _, err = hive(monkeypatch, capsys, "list")
+    assert code == 2 and "agents[1].indices" in err
+
+
+@pytest.mark.parametrize("argv", [["a", "--index", "1"], ["a-t-1"]])
+def test_stop_one_instance(env, monkeypatch, capsys, argv):
+    agents_cfg(env, ("a", "count = 2"))
+    code, out, err = hive(monkeypatch, capsys, "stop", *argv)
+    assert code == 0, err
+    assert f"config agent=a count=2->1 indices=2 file={env.cfg}" in out
+    assert agent_entry(env, "a") == {"type": "a", "dir": str(env.tmp / "a"), "indices": [2]}
+
+
+def test_stop_several_instance_names(env, monkeypatch, capsys):
+    agents_cfg(env, ("a", "count = 3"), ("b", "count = 2"))
+    code, out, err = hive(monkeypatch, capsys, "stop", "a-t-1", "a-t-3", "b-t-2")
+    assert code == 0, err
+    assert agent_entry(env, "a")["indices"] == [2] and agent_entry(env, "b")["count"] == 1
+    assert "config agent=a count=3->1 indices=2" in out and "config agent=b count=2->1 " in out
+
+
+def test_stop_n_with_sparse_takes_highest(env, monkeypatch, capsys):
+    agents_cfg(env, ("a", "indices = [2, 4, 5]"))
+    code, _, err = hive(monkeypatch, capsys, "stop", "a", "-n", "2")
+    assert code == 0, err
+    assert agent_entry(env, "a")["indices"] == [2]
+
+
+def test_stop_type_wins_over_instance_name(env, monkeypatch, capsys):
+    agents_cfg(env, ("a", "count = 1"), ("a-t-1", "count = 2"))
+    code, _, err = hive(monkeypatch, capsys, "stop", "a-t-1")
+    assert code == 0
+    assert agent_entry(env, "a-t-1")["count"] == 1 and agent_entry(env, "a")["count"] == 1
+    assert "hive stop a --index 1" in err
+
+
+@pytest.mark.parametrize("argv,text", [
+    (["a", "a-t-1"], "'a' is a type"),
+    (["a-t-1", "-n", "1"], "-n and --index take one TYPE target"),
+    (["a", "-n", "1", "--index", "1"], "give -n or --index, not both"),
+    (["a", "--index", "3"], "type 'a' has no instance 3 (instances: 1,2)"),
+])
+def test_stop_usage_errors(env, monkeypatch, capsys, argv, text):
+    agents_cfg(env, ("a", "count = 2"))
+    before = env.cfg.read_text()
+    code, _, err = hive(monkeypatch, capsys, "stop", *argv)
+    assert code == 2 and text in err and env.cfg.read_text() == before
+
+
+@pytest.mark.parametrize("name", ["a-t-3", "zz-t-1", "a-other-1"])
+def test_stop_unknown_name(env, monkeypatch, capsys, name):
+    agents_cfg(env, ("a", "count = 2"))
+    code, _, err = hive(monkeypatch, capsys, "stop", name)
+    if name == "a-other-1":  # not an instance name for prefix t: an unknown type
+        assert code == 2 and "no agent type 'a-other-1'" in err
+    else:
+        assert code == 2 and f"no instance '{name}'" in err and "--index" in err
+
+
+def test_stop_queen_instance_name(env, monkeypatch, capsys):
+    agents_cfg(env, ("a", "count = 1"))
+    code, _, err = hive(monkeypatch, capsys, "stop", "hive-queen-t")
+    assert code == 2 and "the queen is always running" in err
+
+
+def test_spawn_fills_lowest_free(env, monkeypatch, capsys):
+    (env.home / ".claude.json").write_text(json.dumps(
+        {"projects": {str(env.tmp / "a"): {"hasTrustDialogAccepted": True}}}))
+    agents_cfg(env, ("a", "indices = [2, 4]"))
+    code, out, err = hive(monkeypatch, capsys, "spawn", "a")
+    assert code == 0, err
+    assert agent_entry(env, "a")["indices"] == [1, 2, 4] and "count=2->3 indices=1,2,4" in out
+    code, out, err = hive(monkeypatch, capsys, "spawn", "a")
+    assert code == 0, err
+    assert agent_entry(env, "a")["count"] == 4 and "indices" not in agent_entry(env, "a")
+
+
+def test_list_shows_indices_when_sparse(env, monkeypatch, capsys):
+    agents_cfg(env, ("a", "indices = [2, 3]"), ("b", "count = 2"))
+    code, out, _ = hive(monkeypatch, capsys, "list")
+    lines = [line for line in out.splitlines() if line.startswith("agent ")]
+    assert code == 0 and " count=2 indices=2,3 running=0 " in lines[0]
+    assert " count=2 running=0 " in lines[1] and " indices=" not in lines[1]
+
+
+def test_adopt_sparse(env, monkeypatch):
+    from hive import tmux
+    agents_cfg(env, ("a", "indices = [2]"))
+    # Legacy-tagged panes (`<prefix>-<type>-<N>`): only the desired index is adopted.
+    listing = "%1\t@1\tt-a\tt-a-1\tt-a-1\n%2\t@1\tt-a\tt-a-2\tt-a-2\n"
+    monkeypatch.setattr("hive.tmux.tmux", lambda cfg, *a, check=True: SimpleNamespace(
+        returncode=0, stdout=listing, stderr=""))
+    running, unmanaged = tmux.running_panes(load_config())
+    assert list(running) == ["a-t-2"] and running["a-t-2"].adopted
+    assert [u["pane"] for u in unmanaged] == ["%1"]
+
+
+def test_stop_type_named_like_the_queen(env, monkeypatch, capsys):
+    agents_cfg(env, ("hive-queen-t", "count = 2"))
+    code, _, err = hive(monkeypatch, capsys, "stop", "hive-queen-t", "--index", "1")
+    assert code == 0, err
+    assert agent_entry(env, "hive-queen-t")["indices"] == [2]
+
+
+def test_stop_instance_of_dot_type(env, monkeypatch, capsys):
+    agents_cfg(env, (".a", "count = 2"))
+    code, _, err = hive(monkeypatch, capsys, "stop", ".a-t-1")
+    assert code == 0, err
+    assert agent_entry(env, ".a")["indices"] == [2]

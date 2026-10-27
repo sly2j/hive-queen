@@ -66,8 +66,15 @@ def parse_legacy_name(prefix, name):
     return None
 
 
+def agent_indices(agent):
+    """The instance numbers N of an agent type, ascending: `indices`, else 1..count."""
+    if "indices" in agent:
+        return list(agent["indices"])
+    return list(range(1, agent["count"] + 1))
+
+
 def desired_panes(cfg):
-    """The queen first (unless disabled), then each agent type in config order, indices 1..count."""
+    """The queen first (unless disabled), then each agent type in config order, by index."""
     prefix = cfg["prefix"]
     queen = cfg["queen"]
     name = queen_name(prefix)
@@ -78,7 +85,7 @@ def desired_panes(cfg):
                           tuple(queen.get("args", ())), queen.get("system", "claude")))
     for agent in cfg["agents"]:
         window = f"{agent['type']}-{prefix}"
-        for i in range(1, agent["count"] + 1):
+        for i in agent_indices(agent):
             panes.append(Pane(f"{window}-{i}", window, agent["type"], i,
                               agent["dir"], agent["command"], agent.get("env", {}),
                               agent.get("config_dir"), tuple(agent.get("args", ())),

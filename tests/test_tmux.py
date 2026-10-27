@@ -592,3 +592,35 @@ def test_second_profile_is_isolated(hive, tmp_path):
         b_tmux("kill-server")
     assert h.tmux("list-panes", "-a", "-F", "#{pane_id} #{@hive_name}").stdout == before
     assert "running=yes" in h.run("list").stdout.splitlines()[0]
+
+
+def test_stop_by_index_keeps_others_and_spawn_refills(hive, tmp_path):
+    h = hive
+
+    def ids():
+        return dict(reversed(line.split()) for line in h.tmux(
+            "list-panes", "-s", "-t", "=t-agents", "-F", "#{pane_id} #{@hive_name}"
+        ).stdout.splitlines())
+
+    assert h.run("up").returncode == 0
+    a2 = ids()["a-t-2"]
+
+    # out of order: -1 goes, -2 keeps running in the same pane, also across a reconcile
+    r = h.run("stop", "a", "--index", "1")
+    assert r.returncode == 0, r.stderr
+    assert "stopped a-t-1" in r.stdout and "config agent=a count=2->1 indices=2" in r.stdout
+    assert "\nindices = [2]\n" in h.config.read_text()
+    assert h.run("reconcile").stdout.strip() == "no changes"
+    assert h.names() == {"hive-queen-t", "a-t-2"} and ids()["a-t-2"] == a2
+
+    # spawn refills the hole; -2 is untouched
+    r = h.run("spawn", "a", "--trust")
+    assert r.returncode == 0, r.stderr
+    assert "started a-t-1" in r.stdout and "config agent=a count=1->2 file=" in r.stdout
+    assert h.names() == {"hive-queen-t", "a-t-1", "a-t-2"} and ids()["a-t-2"] == a2
+    assert "\ncount = 2\n" in h.config.read_text() and "indices" not in h.config.read_text()
+
+    # by instance name
+    r = h.run("stop", "a-t-2")
+    assert r.returncode == 0 and "stopped a-t-2" in r.stdout
+    assert h.names() == {"hive-queen-t", "a-t-1"} and "\ncount = 1\n" in h.config.read_text()

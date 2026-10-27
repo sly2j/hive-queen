@@ -267,3 +267,22 @@ def test_reserved_hive_queen_type_rejected(dirs):
         resolve_target(cfg, "/x", "hive-queen")
     with pytest.raises(ResolveError, match="queen is always running"):
         sandbox_type(cfg, "hive-queen", "x")
+
+
+# --- sparse indices (R2, D6) ---------------------------------------------------
+
+def test_desired_panes_sparse():
+    cfg = make_cfg([("a", "/a", 2)])
+    cfg["agents"][0]["indices"] = [2, 3]
+    assert [(p.name, p.index) for p in desired_panes(cfg)][1:] == [("a-swarm-2", 2), ("a-swarm-3", 3)]
+
+
+def test_plan_sparse_does_not_restart_hole():
+    cfg = make_cfg([("a", "/a", 1)])
+    cfg["agents"][0]["indices"] = [2]
+    queen = RunningPane("%0", "@0", "hive-queen-swarm", "hive-queen-swarm", "queen", 1, False)
+    run = {r.name: r for r in (queen, running("a", 2))}
+    assert plan(desired_panes(cfg), run, "hive-queen-swarm") == ([], [])
+    run["a-swarm-1"] = running("a", 1)
+    to_start, to_stop = plan(desired_panes(cfg), run, "hive-queen-swarm")
+    assert to_start == [] and [r.name for r in to_stop] == ["a-swarm-1"]

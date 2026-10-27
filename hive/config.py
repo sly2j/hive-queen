@@ -27,7 +27,7 @@ TOP_KEYS = {"prefix", "session", "tmux_socket", "login_shell", "shell",
 DEFAULTS_KEYS = {"command", "launcher", "args", "system"}
 LAUNCHER_KEYS = {"name", "command", "config_dir", "description", "system"}
 LAUNCHER_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
-AGENT_KEYS = {"type", "dir", "count", "command", "args", "env", "config_dir", "system"}
+AGENT_KEYS = {"type", "dir", "count", "indices", "command", "args", "env", "config_dir", "system"}
 QUEEN_KEYS = {"command", "args", "discover", "env", "config_dir", "enabled", "system"}
 TYPE_RE = re.compile(r"[A-Za-z0-9._-]+")
 # tmux rewrites or mis-targets names with these.
@@ -362,10 +362,21 @@ def parse_agents(raw, default_command, default_args, default_system, path):
 
         directory = abs_path(entry["dir"], f"{where}.dir", path)
 
-        count = entry.get("count", 1)
-        check_type(count, int, f"{where}.count", path)
-        if count < 0:
-            raise ConfigError(f"{path}: {where}.count must be >= 0")
+        if "indices" in entry:
+            if "count" in entry:
+                raise ConfigError(f"{path}: {where} has both 'count' and 'indices'; keep one")
+            indices = entry["indices"]
+            check_type(indices, list, f"{where}.indices", path)
+            if (any(not isinstance(i, int) or isinstance(i, bool) or i < 1 for i in indices)
+                    or len(set(indices)) != len(indices)):
+                raise ConfigError(f"{path}: {where}.indices must be distinct integers >= 1")
+            indices = sorted(indices)
+        else:
+            count = entry.get("count", 1)
+            check_type(count, int, f"{where}.count", path)
+            if count < 0:
+                raise ConfigError(f"{path}: {where}.count must be >= 0")
+            indices = list(range(1, count + 1))
 
         command = entry.get("command", default_command)
         if command is None:
@@ -378,7 +389,9 @@ def parse_agents(raw, default_command, default_args, default_system, path):
         agent_env = entry.get("env", {})
         check_env(agent_env, f"{where}.env", path)
 
-        agents.append({"type": kind, "dir": directory, "count": count, "command": command,
+        # `count` is the number of instances; `indices` their numbers N (D6).
+        agents.append({"type": kind, "dir": directory, "count": len(indices),
+                       "indices": indices, "command": command,
                        "args": agent_args, "env": agent_env,
                        "config_dir": check_config_dir(entry, where, path),
                        "system": check_system(entry, f"{where}.system", default_system, path)})

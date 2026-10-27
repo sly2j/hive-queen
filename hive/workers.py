@@ -9,14 +9,15 @@ from pathlib import Path
 from hive import tmux
 from hive.config import (TYPE_RE, check_config_writable, edit_config, expand_config_dir,
                          load_config)
-from hive.configedit import ENV_KEY_RE, append_agent, set_count
+from hive.configedit import ENV_KEY_RE, append_agent, set_indices
 from hive.drivers import get_driver
 from hive.drivers.claude import CONFIG_DIR_ENV, CONFIG_DIR_ENV_MSG
 from hive.launch import check_launcher_command
 from hive.launchers import check_launcher_type, launcher_record
 from hive.lifecycle import kept_queen, reconcile
-from hive.reconcile import (RESERVED_TYPES, Existing, New, ResolveError, desired_panes, plan,
-                            queen_name, resolve_target, sandbox_type)
+from hive.reconcile import (QUEEN_ERROR, RESERVED_TYPES, Existing, New, ResolveError,
+                            agent_indices, desired_panes, parse_name, plan, queen_name,
+                            resolve_target, sandbox_type)
 from hive.trust import TrustError
 from hive.util import die, positive_int, quote
 
@@ -37,7 +38,8 @@ def cmd_list(cfg, args):
           f"enabled={'yes' if cfg['queen']['enabled'] else 'no'}")
     for agent in cfg["agents"]:
         n = sum(1 for r in running.values() if r.type == agent["type"])
-        print(f"agent type={agent['type']} dir={agent['dir']} count={agent['count']} "
+        print(f"agent type={agent['type']} dir={agent['dir']} count={agent['count']}"
+              f"{sparse_field(agent_indices(agent))} "
               f"running={n} command={quote(agent['command'])} "
               f"args={json.dumps(agent['args'])} {trust_fields(cfg, agent)}"
               + ("" if Path(agent["dir"]).is_dir() else " dir_missing=yes"))
@@ -59,14 +61,44 @@ def cmd_list(cfg, args):
     return 0
 
 
-def set_count_edit(cfg, kind, new_count):
+def sparse_field(indices):
+    """` indices=2,3` when the instance numbers are not 1..N (D6), else nothing."""
+    if indices == list(range(1, len(indices) + 1)):
+        return ""
+    return f" indices={','.join(map(str, indices))}"
+
+
+def set_indices_edit(cfg, changes):
+    """Write {type: instance numbers} to config.toml in one edit: `count` or `indices`."""
+    def edit(text):
+        for kind, indices in changes.items():
+            text = set_indices(text, kind, indices)
+        return text
+
     def mutate(doc):
-        next(a for a in doc["agents"] if a["type"] == kind)["count"] = new_count
-    edit_config(cfg, lambda text: set_count(text, kind, new_count), mutate)
+        for kind, indices in changes.items():
+            entry = next(a for a in doc["agents"] if a["type"] == kind)
+            entry.pop("count", None)
+            entry.pop("indices", None)
+            if sparse_field(sorted(indices)):
+                entry["indices"] = sorted(indices)
+            else:
+                entry["count"] = len(indices)
+    edit_config(cfg, edit, mutate)
 
 
-def after_edit(cfg, kind, old_count, new_count):
-    print(f"config agent={kind} count={old_count}->{new_count} file={cfg['config_path']}")
+def report_edit(cfg, kind, old, new):
+    """old and new are instance-number lists; new also as `indices=` when sparse."""
+    print(f"config agent={kind} count={len(old)}->{len(new)}{sparse_field(sorted(new))} "
+          f"file={cfg['config_path']}")
+
+
+def after_edit(cfg, kind, old, new):
+    report_edit(cfg, kind, old, new)
+    return reconcile_if_up(cfg)
+
+
+def reconcile_if_up(cfg):
     if not tmux.session_running(cfg):
         print("session not running; config updated, run 'hive up'")
         return 0
@@ -187,8 +219,9 @@ def cmd_spawn(cfg, args):
                 "fix or remove the entry in config.toml")
         check_config_writable(cfg)
         ensure_trust(entry["dir"], entry["config_dir"], args.trust, entry["system"])
-        old, new = entry["count"], entry["count"] + args.n
-        set_count_edit(cfg, entry["type"], new)
+        old = agent_indices(entry)
+        new = sorted(old + lowest_free(old, args.n))
+        set_indices_edit(cfg, {entry["type"]: new})
         return after_edit(cfg, entry["type"], old, new)
 
     # The type ends up unquoted in names and commands; keep it to safe characters.
@@ -214,22 +247,94 @@ def cmd_spawn(cfg, args):
                 lambda text: append_agent(text, target.type, target.stored_dir, args.n,
                                           command, env, config_dir, agent_args),
                 lambda doc: doc.setdefault("agents", []).append(new_agent))
-    return after_edit(cfg, target.type, 0, args.n)
+    return after_edit(cfg, target.type, [], list(range(1, args.n + 1)))
+
+
+def lowest_free(indices, n):
+    """The n lowest instance numbers not in indices (spawn refills holes first)."""
+    taken, free, i = set(indices), [], 1
+    while len(free) < n:
+        if i not in taken:
+            free.append(i)
+        i += 1
+    return free
+
+
+def is_type(cfg, target):
+    return target in RESERVED_TYPES or any(a["type"] == target for a in cfg["agents"])
+
+
+def is_path(target):
+    return "/" in target or target.startswith(("~", "."))
+
+
+def instance(cfg, name):
+    """(entry, N) for the configured instance named `<type>-<machine>-<N>`, else None."""
+    parsed = parse_name(cfg["prefix"], name)
+    if parsed is None or parsed[0] == "queen":
+        return None
+    entry = next((a for a in cfg["agents"] if a["type"] == parsed[0]), None)
+    return (entry, parsed[1]) if entry and parsed[1] in agent_indices(entry) else None
+
+
+def stop_type(cfg, args):
+    """`hive stop TYPE [-n N | --index N...]`: the entry and the numbers to remove."""
+    target = args.targets[0]
+    if not (is_type(cfg, target) or is_path(target)):
+        die(f"no agent type '{target}'; 'hive list' shows the types")
+    entry = resolve_or_die(cfg, target)
+    if not isinstance(entry, Existing):
+        die(f"no agent type '{entry.type}'; 'hive list' shows the types")
+    entry = entry.entry
+    current = agent_indices(entry)
+    shadowed = instance(cfg, target) if target == entry["type"] else None
+    if shadowed:
+        print(f"hive: note: '{target}' is a type; to stop instance {shadowed[1]} of type "
+              f"'{shadowed[0]['type']}' run: hive stop {shadowed[0]['type']} --index "
+              f"{shadowed[1]}", file=sys.stderr)
+    if args.index:
+        missing = sorted(set(args.index) - set(current))
+        if missing:
+            die(f"type '{entry['type']}' has no instance {','.join(map(str, missing))} "
+                f"(instances: {','.join(map(str, current)) or 'none'})")
+        return entry, set(args.index)
+    n = args.n or 1
+    if n > len(current):
+        die(f"type '{entry['type']}' has count {len(current)}; cannot stop {n}")
+    return entry, set(current[len(current) - n:])  # the highest indices go first
 
 
 def cmd_stop(cfg, args):
-    if (args.target != "queen" and not any(a["type"] == args.target for a in cfg["agents"])
-            and "/" not in args.target and not args.target.startswith(("~", "."))):
-        die(f"no agent type '{args.target}'; 'hive list' shows the types")
-    target = resolve_or_die(cfg, args.target)
-    if not isinstance(target, Existing):
-        die(f"no agent type '{target.type}'; 'hive list' shows the types")
-    entry = target.entry
-    if args.n > entry["count"]:
-        die(f"type '{entry['type']}' has count {entry['count']}; cannot stop {args.n}")
-    old, new = entry["count"], entry["count"] - args.n
-    set_count_edit(cfg, entry["type"], new)
-    return after_edit(cfg, entry["type"], old, new)
+    if args.n is not None and args.index:
+        die("give -n or --index, not both")
+    one = args.targets[0] if len(args.targets) == 1 else None
+    # D6: a configured type wins, then a configured instance name, then a path.
+    if one is not None and (is_type(cfg, one) or (instance(cfg, one) is None and (
+            is_path(one) or parse_name(cfg["prefix"], one) is None))):
+        entry, remove = stop_type(cfg, args)
+        changes = {entry["type"]: remove}
+    else:
+        if args.n is not None or args.index:
+            die("-n and --index take one TYPE target: hive stop TYPE --index N")
+        changes = {}
+        for name in args.targets:
+            hit = instance(cfg, name)
+            if is_type(cfg, name) or (hit is None and is_path(name)):
+                die(f"'{name}' is a type; give one TYPE (with -n or --index) "
+                    "or only instance names")
+            if name == queen_name(cfg["prefix"]):
+                die(QUEEN_ERROR)
+            if hit is None:
+                die(f"no instance '{name}'; 'hive list' shows the pane names, "
+                    "or run: hive stop TYPE --index N")
+            changes.setdefault(hit[0]["type"], set()).add(hit[1])
+    entries = {a["type"]: a for a in cfg["agents"]}
+    new = {kind: [i for i in agent_indices(entries[kind]) if i not in remove]
+           for kind, remove in changes.items()}
+    set_indices_edit(cfg, new)
+    for kind in new:
+        report_edit(cfg, kind, agent_indices(entries[kind]), new[kind])
+    return reconcile_if_up(cfg)
 
 
 def add_parser(sub, name):
@@ -260,6 +365,12 @@ def add_parser(sub, name):
         p.add_argument("--trust", action="store_true",
                        help="record Claude Code workspace trust for the directory (only after the user agreed)")
     elif name == "stop":
-        p = sub.add_parser("stop", help="remove workers (lowers count, then reconciles)")
-        p.add_argument("target", metavar="TARGET", help="agent type")
-        p.add_argument("-n", type=positive_int, default=1, help="number of workers to remove (default 1)")
+        p = sub.add_parser("stop", help="remove workers (edits config, then reconciles)",
+                           description="Remove workers: N of a type, highest index first, the "
+                           "instances --index names, or the instances named "
+                           "<type>-<machine>-<N>. A TARGET that is a type is a type.")
+        p.add_argument("targets", metavar="TARGET", nargs="+",
+                       help="agent type, or one or more instance names")
+        p.add_argument("-n", type=positive_int, help="number of workers to remove (default 1)")
+        p.add_argument("--index", type=positive_int, action="append", metavar="N",
+                       help="remove instance N of TYPE (repeatable)")

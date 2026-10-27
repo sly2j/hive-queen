@@ -318,3 +318,50 @@ def test_set_default_launcher_ignores_comment():
     new = set_default_launcher(EXAMPLE, "x")
     assert changes(EXAMPLE, new) == ['+launcher = "x"']
     assert tomllib.loads(new)["defaults"]["launcher"] == "x"
+
+
+# --- set_indices (R2, D6) ------------------------------------------------------
+
+def edit_indices(text, type_, indices):
+    new = configedit.set_indices(text, type_, indices)
+
+    def mutate(doc):
+        entry = next(a for a in doc["agents"] if a["type"] == type_)
+        entry.pop("count", None)
+        entry.pop("indices", None)
+        if sorted(indices) == list(range(1, len(indices) + 1)):
+            entry["count"] = len(indices)
+        else:
+            entry["indices"] = sorted(indices)
+    verify(text, new, mutate)
+    return new
+
+
+def test_set_indices():
+    text = '[[agents]]\ntype = "a"\ndir = "/a"\ncount = 3   # three\n\n[[agents]]\ntype = "b"\ndir = "/b"\n'
+    new = edit_indices(text, "a", [3, 2])
+    assert new == '[[agents]]\ntype = "a"\ndir = "/a"\nindices = [2, 3]\n\n[[agents]]\ntype = "b"\ndir = "/b"\n'
+    assert "count" not in new
+
+
+def test_set_indices_collapses():
+    text = '[[agents]]\ntype = "a"\ndir = "/a"\nindices = [2, 3]\n'
+    new = edit_indices(text, "a", [1, 2, 3])
+    assert new == '[[agents]]\ntype = "a"\ndir = "/a"\ncount = 3\n'
+
+
+def test_set_indices_contiguous_keeps_count_comment():
+    text = '[[agents]]\ntype = "a"\ndir = "/a"\ncount = 3   # three\n'
+    assert edit_indices(text, "a", [1, 2]) == text.replace("3   #", "2   #")
+
+
+def test_set_indices_inserts_when_no_key():
+    text = '[[agents]]\ntype = "a"\ndir = "/a"\n\n[[agents]]\ntype = "b"\ndir = "/b"\n'
+    new = edit_indices(text, "b", [2])
+    assert new.endswith('type = "b"\ndir = "/b"\nindices = [2]\n')
+    assert edit_indices(NO_NEWLINE, "a", [2]) == NO_NEWLINE.replace("count = 1", "indices = [2]")
+
+
+def test_set_indices_empty_is_count_zero():
+    text = '[[agents]]\ntype = "a"\ndir = "/a"\nindices = [2]\n'
+    assert edit_indices(text, "a", []) == text.replace("indices = [2]", "count = 0")
