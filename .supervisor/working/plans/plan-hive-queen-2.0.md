@@ -585,10 +585,14 @@ the squash-merge.
 - Owns: `hive/hooks/*`, `hive/activity.py`, `hive/drivers/*` (hook fixes only),
   `hive/launch.py` (hook injection line), `hive/workers.py` (`cmd_list` state field),
   `hive/lifecycle.py` (`cmd_status` state), `pyproject.toml` (package data `hooks/*`),
-  `tests/test_activity.py`, `tests/test_hooks.py`, `docs/idle-detection.md`.
+  `tests/test_activity.py`, `tests/test_hooks.py`, `docs/idle-detection.md`,
+  `hive/config.py` (state_dir in parse_config/lenient_config), `hive/tmux.py` (setup_pane status
+  reset), `hive/queen/CLAUDE.md` (hive list bullet only), `tests/test_cli.py`,
+  `tests/test_drivers.py`, `tests/test_args.py`, `tests/data/fake_worker.py`,
+  `tests/test_driver_opencode.py`, `tests/test_driver_codex.py`.
 - Deps: R1
 - Stages: plan, execute
-- Status: plan
+- Status: execute
 - Lead: executor (child plan by planner: the status file schema, the per-event mapping per
   driver from research A3, the OpenCode poll)
 - Accept: `status_hook_writes_file: Claude Stop JSON on stdin -> state done, session_id set`;
@@ -599,8 +603,8 @@ the squash-merge.
   `status_prints_state`; `hook_args_passed_on_every_launch: resume command still contains the
   hook flags`. Validate: a Claude and an OpenCode worker in the test hive (`config_dir` under the
   profile): send a prompt via `send-keys`, `list` shows `busy` then `done`; a fake worker (D13)
-  shows `quiet` via the fallback; `down`.
-- Artifacts: plan-hive-queen-2.0-R3.md
+  shows `quiet` via the fallback; `down`. executor validates with tests/data/fake_worker.py (Claude-shaped events through the real --settings injection) plus the D13 worker for the tmux fallback; real Claude/OpenCode/Codex checks are user-run, one Log line each.
+- Artifacts: .supervisor/working/plans/plan-r3-done-detection.md
 
 ### R4: Resume sessions
 - Goal: a stopped worker restarts into its previous session (D17); done when `spawn --resume`
@@ -722,6 +726,11 @@ the squash-merge.
 - 2026-10-27 risk: a Codex daemon started by `hive up` under systemd dies with the hive service; `up` re-ensures it
 - 2026-10-27 R1 (supervisor): Slices 1, 2, 4 dispatched to executor on feat/r1-claude-driver; Slices 5 (OpenCode) and 6 (Codex) blocked on user gate tests G1/G2
 - 2026-10-27 R5: done; `[[nodes]]` (name, host, hive, profile, description), global `hive --node NAME <cmd>` over `ssh -o BatchMode=yes` with exit passthrough, refuses attach/option injection/default-profile nodes from a named local profile, `hive nodes`, guard allows `--node NAME`, docs/multi-node.md; 506 tests green; local test profile drove the queen-less swarm test profile live, production panes unchanged on both machines; landed on main as b5136c0 (squash); lead decisions: `--node NAME` ends local option parsing, no `--profile` sent for default remote profile (older remote hives work); deferred: `hive nodes`/`--node` in docs/commands.md (R8b); note for R6: keep the guard's `--node` shift in guard_core; swarm dev clone is on feat/r5-nodes, check out main there after the next bundle
+- 2026-10-27 R1 (slices 1, 2, 4): done; claude driver session ids (@hive_session, --session-id appended or {session_id}), hook/resume args, waiting kinds, system=/waiting=<kind> in list, --system on spawn/launchers add/inspect-launcher, driver default command, version probe with min_version, KNOWN_SYSTEMS texts, every driver's config_dir_env rejected; pytest 559 passed both commands; live spike-r1 check: real claude waiting=theme, @hive_session equals the process --session-id, production panes and ~/.claude.json unchanged; landed on main as 4a5e670 (squash); deviations: driver `binary` attribute for the probe, --system skips the default launcher, the queen system check applies only when the queen is enabled; deferred: slices 3/7 (user gates), 5/6 (wait on gates), guard.py --system handling (R6); upgrade note for R7: configs whose command lacks {session_id} get --session-id appended after upgrade
+- 2026-10-27 R3 (planner): child plan written at .supervisor/working/plans/plan-r3-done-detection.md (Slice 1 Claude path + fake worker, Slice 2 docs/queen bullet, gated Slices 3 OpenCode poll and 4 Codex hooks); critic codex round 1 REVISE, round 2 PASS; deferred: real-agent smokes (Slices 2-4) and the token round Q1 to the user
+- 2026-10-27 amend D16: `source` values hook|api|tmux; Claude hooks also UserPromptSubmit and StopFailure, Notification matcher adds agent_needs_input; SessionStart maps to done; status and screen files reset at launch; OpenCode by one-shot poll only (no SSE in R3)
+- 2026-10-27 amend D17: the OpenCode session id comes from `@hive_session` (R1 D-R1.6), not the status file; Codex from the status file unchanged
+- 2026-10-27 R3 (supervisor): Slices 1-2 dispatched to executor on feat/r3-done-detection; Slices 3-4 blocked on gates G1/G2
 
 ## Todo
 

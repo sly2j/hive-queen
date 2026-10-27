@@ -410,10 +410,10 @@ None: the two gates are scheduled user actions (Slice 3).
 
 ## Todo
 
-- [ ] Slice 1: claude driver methods, session id in `setup_pane`, `@hive_session`, waiting kinds
-- [ ] Slice 2: `hive list` `system=`/`waiting=<kind>`, `docs/systems/claude.md`, test-hive check
+- [x] Slice 1: claude driver methods, session id in `setup_pane`, `@hive_session`, waiting kinds
+- [x] Slice 2: `hive list` `system=`/`waiting=<kind>`, `docs/systems/claude.md`, test-hive check
 - [ ] Slice 3: user gates, one Log decision line per system, `min_version`, `start` idempotency
-- [ ] Slice 4: seam plumbing (`--system` on spawn/launchers/inspect, driver default command, probe, known-systems texts, env rejection)
+- [x] Slice 4: seam plumbing (`--system` on spawn/launchers/inspect, driver default command, probe, known-systems texts, env rejection)
 - [ ] Slice 5: opencode driver and docs page (if G1 passed), spike step logged
 - [ ] Slice 6: codex driver and docs page (if G2 passed), spike step logged
 - [ ] Slice 7: example config; user-run swarm check
