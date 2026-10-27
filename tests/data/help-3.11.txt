@@ -88,7 +88,7 @@ options:
   -h, --help  show this help message and exit
 === hive spawn --help
 usage: hive spawn [-h] [-n N] [--type TYPE] [--command CMD] [--arg ARG] [--config-dir PATH]
-                  [--launcher NAME] [--system NAME] [--env KEY=VALUE] [--trust]
+                  [--launcher NAME] [--system NAME] [--env KEY=VALUE] [--trust] [--resume NAME]
                   TARGET
 
 Add workers: raise the count of an existing agent type, or add a new type for a directory. Exit 3
@@ -115,19 +115,22 @@ options:
   --env KEY=VALUE       env for a new type, exported after [env] (repeatable)
   --trust               record Claude Code workspace trust for the directory (only after the user
                         agreed)
+  --resume NAME         put back instance NAME of type TARGET, stopped with --keep-session, and
+                        launch it into its kept session
 === hive stop --help
-usage: hive stop [-h] [-n N] [--index N] TARGET [TARGET ...]
+usage: hive stop [-h] [-n N] [--index N] [--keep-session] TARGET [TARGET ...]
 
 Remove workers: N of a type, highest index first, the instances --index names, or the instances
 named <type>-<machine>-<N>. A TARGET that is a type is a type.
 
 positional arguments:
-  TARGET      agent type, or one or more instance names
+  TARGET          agent type, or one or more instance names
 
 options:
-  -h, --help  show this help message and exit
-  -n N        number of workers to remove (default 1)
-  --index N   remove instance N of TYPE (repeatable)
+  -h, --help      show this help message and exit
+  -n N            number of workers to remove (default 1)
+  --index N       remove instance N of TYPE (repeatable)
+  --keep-session  record each removed instance's session id for 'hive spawn TYPE --resume NAME'
 === hive reconcile --help
 usage: hive reconcile [-h] [--dry-run]
 

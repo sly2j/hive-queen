@@ -1,7 +1,7 @@
 """Fake agent for live checks: runs the hook commands from --settings, then sleeps.
 
 Usage: FAKE_EVENTS="SessionStart UserPromptSubmit:3 Stop:6" fake_worker.py NAME --remote-control X \
-    --session-id ID --settings JSON
+    --session-id ID --settings JSON  (or --resume ID in place of --session-id)
 Items are `Event`, `Event:T` or `Notification:TYPE:T` (T = seconds after start). Other args are ignored.
 """
 
@@ -19,7 +19,7 @@ def parse_args(argv):
     name = argv[0] if argv and not argv[0].startswith("-") else "fake"
     opts = {}
     for i, arg in enumerate(argv):
-        if arg in ("--session-id", "--settings") and i + 1 < len(argv):
+        if arg in ("--session-id", "--resume", "--settings") and i + 1 < len(argv):
             opts[arg] = argv[i + 1]
     return name, opts
 
@@ -65,7 +65,7 @@ def commands(settings, event, kind):
 
 def main(argv):
     name, opts = parse_args(argv)
-    session_id = opts.get("--session-id")
+    session_id = opts.get("--session-id") or opts.get("--resume")
     settings = json.loads(opts["--settings"]) if "--settings" in opts else {}
     start = time.monotonic()
     for item in os.environ.get("FAKE_EVENTS", DEFAULT_EVENTS).split():

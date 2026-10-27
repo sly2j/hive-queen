@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import uuid
 
+from hive import sessions
 from hive.activity import reset_status
 from hive.drivers import DRIVERS, get_driver
 from hive.launch import expand_pane
@@ -93,7 +94,8 @@ def window_ids(cfg):
 def setup_pane(cfg, pane, pane_id):
     """Title, tag, and type the command into a freshly created pane; return the session id."""
     driver = get_driver(pane.system)
-    session_id = (driver.prepare_launch({**cfg["env"], **(pane.env or {})}, pane)
+    resume_id = sessions.pending_resume(cfg, pane.name)  # set by `hive spawn --resume`
+    session_id = (resume_id or driver.prepare_launch({**cfg["env"], **(pane.env or {})}, pane)
                   or str(uuid.uuid4()))
     tmux(cfg, "select-pane", "-t", pane_id, "-T", pane.name)
     # Keep apps from overwriting the title; ignore tmux versions without the option.
@@ -103,8 +105,11 @@ def setup_pane(cfg, pane, pane_id):
         tmux(cfg, "set-option", "-p", "-t", pane_id, "@hive_session", session_id)
     reset_status(cfg, pane.name)  # a new launch never shows the previous one's state
     tmux(cfg, "send-keys", "-t", pane_id, "-l",
-         shell_line(cfg, pane.dir, expand_pane(cfg, pane, session_id), pane.env))
+         shell_line(cfg, pane.dir, expand_pane(cfg, pane, session_id, resume_id is not None),
+                    pane.env))
     tmux(cfg, "send-keys", "-t", pane_id, "Enter")
+    if resume_id is not None:
+        sessions.forget(cfg, [pane.name])  # resumed once; a later launch starts fresh
     return session_id
 
 

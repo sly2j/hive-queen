@@ -14,7 +14,6 @@ ROOT = Path(__file__).resolve().parent.parent
 PENDING_PAGES = {
     "docs/test-profile.md",
     "docs/idle-detection.md",
-    "docs/resume.md",
     "docs/upgrade.md",
 }
 PENDING_DIRS = ("docs/systems/",)

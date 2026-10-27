@@ -41,11 +41,15 @@ def expand_command(command, args, **values):
     return f"{command} {quoted}" if quoted else command
 
 
-def expand_pane(cfg, pane, session_id=None):
+def expand_pane(cfg, pane, session_id=None, resume=False):
     """The pane's command line. With a session id, {session_id} is expanded; when neither the
     command nor an arg has it, the driver's session args are appended; the driver's status-hook
     flags are always appended. Without one, nothing is appended and {session_id} stays literal
     (lifecycle prints, preflight).
+
+    With resume, the driver's resume args for that id go first in the args (so at {args}, else
+    appended), and its session args are neither appended nor kept: `--session-id {session_id}`
+    (or `=`) is dropped from the command and args (Claude refuses both flags at once).
 
     A `sh -c '...'` wrapper must pass appended flags through: `sh -c '... exec claude "$@"' sh`;
     otherwise they become its $0, and {session_id} must sit inside its quotes.
@@ -54,14 +58,39 @@ def expand_pane(cfg, pane, session_id=None):
                   prefix=cfg["prefix"])
     if session_id is None:
         return expand_command(pane.command, pane.args, **values)
-    command = expand_command(pane.command, pane.args, session_id=session_id, **values)
     driver = get_driver(pane.system)
+    command, args = pane.command, list(pane.args)
+    if resume:
+        command, args = drop_session_args(driver, command, args)
+        args = [*driver.resume_args(session_id), *args]
+    expanded = expand_command(command, args, session_id=session_id, **values)
     extra = []
-    if not ("{session_id}" in pane.command or any("{session_id}" in a for a in pane.args)):
+    if not resume and not ("{session_id}" in command or any("{session_id}" in a for a in args)):
         extra += driver.session_args(session_id)
     extra += driver.hook_args(hook_cmd(), status_file(cfg, pane.name))
     quoted = " ".join(shlex.quote(a) for a in extra)
-    return f"{command} {quoted}" if quoted else command
+    return f"{expanded} {quoted}" if quoted else expanded
+
+
+def drop_session_args(driver, command, args):
+    """Command and args without the driver's session args written with {session_id}, as
+    `--flag {session_id}` or `--flag={session_id}`."""
+    words = driver.session_args("{session_id}")
+    if not words:
+        return command, args
+    forms = [" ".join(words)] + (["=".join(words)] if len(words) == 2 else [])
+    # Each word optionally quoted, separated by whitespace or `=`.
+    pattern = r"(?:\s+|=)".join(rf"(['\"]?){re.escape(w)}\{k + 1}" for k, w in enumerate(words))
+    command = re.sub(r"\s*" + pattern + r"(?=\s|'|\"|$)", "", command)
+    n, kept, i = len(words), [], 0
+    while i < len(args):
+        if args[i:i + n] == words:
+            i += n
+            continue
+        if args[i] not in forms:
+            kept.append(args[i])
+        i += 1
+    return command, kept
 
 
 def check_launcher_command(command, where, system=DEFAULT_SYSTEM):

@@ -6,7 +6,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from hive import tmux
+from hive import sessions, tmux
 from hive.activity import pane_map, pane_state, state_fields
 from hive.config import (TYPE_RE, ConfigError, check_config_writable, edit_config,
                          expand_config_dir, load_config)
@@ -60,6 +60,9 @@ def cmd_list(cfg, args):
               f"{state_fields(state)}{waiting}")
     for u in unmanaged:
         print(f"unmanaged pane={u['pane']} window={u['window']} title={quote(u['title'])}")
+    for name, kept in sorted(sessions.load(cfg).items()):
+        print(f"kept name={name} session={kept['session_id']} "
+              f"resume={'pending' if kept.get('resume') is True else 'no'}")
     if up:
         to_start, to_stop = plan(desired_panes(cfg), running, kept_queen(cfg))
         if to_start or to_stop:
@@ -180,6 +183,8 @@ def expand_dir_or_none(config_dir):
 
 
 def cmd_spawn(cfg, args):
+    if args.resume is not None:
+        return spawn_resume(cfg, args)
     command, config_dir, type_name = args.agent_command, args.config_dir, args.type
     agent_args = args.agent_args
     record = None
@@ -293,6 +298,53 @@ def cmd_spawn(cfg, args):
     return after_edit(cfg, target.type, [], list(range(1, args.n + 1)))
 
 
+def spawn_resume(cfg, args):
+    """`hive spawn TYPE --resume NAME`: put instance NAME back and launch it into its kept
+    session (docs/resume.md)."""
+    name = args.resume
+    given = [flag for flag, value in (
+        ("-n", args.n != 1), ("--type", args.type), ("--command", args.agent_command),
+        ("--arg", args.agent_args), ("--config-dir", args.config_dir),
+        ("--launcher", args.launcher), ("--system", args.system), ("--env", args.env)) if value]
+    if given:
+        die(f"--resume restarts one kept instance as configured; do not combine it with "
+            f"{', '.join(given)}", 2)
+    kept = sessions.load(cfg).get(name)
+    if kept is None:
+        names = ", ".join(sorted(sessions.load(cfg))) or "none"
+        die(f"no kept session for '{name}' (kept: {names}); keep one with "
+            "hive stop NAME --keep-session", 2)
+    target = resolve_or_die(cfg, args.target)
+    if not isinstance(target, Existing):
+        die(f"no agent type '{target.type}'; --resume needs the type of '{name}'", 2)
+    entry = target.entry
+    parsed = parse_name(cfg["prefix"], name)
+    if parsed is None or parsed[0] != entry["type"]:
+        die(f"'{name}' is not an instance of type '{entry['type']}'", 2)
+    old = agent_indices(entry)
+    if parsed[1] in old:
+        die(f"instance '{name}' is configured already; stop it first: hive stop {name}", 2)
+    if not Path(entry["dir"]).is_dir():
+        die(f"type '{entry['type']}' has dir '{entry['dir']}', which does not exist; "
+            "fix or remove the entry in config.toml")
+    check_config_writable(cfg)
+    ensure_trust(entry["dir"], entry["config_dir"], args.trust, entry["system"])
+    new = sorted(old + [parsed[1]])
+    # Mark first: a configured instance without its mark would launch a fresh session.
+    try:
+        sessions.mark_resume(cfg, name)
+    except OSError as e:
+        die(f"cannot write {sessions.sessions_file(cfg)}: {e}", 1)
+    try:
+        set_indices_edit(cfg, {entry["type"]: new})
+    except BaseException:
+        sessions.record(cfg, {name: kept["session_id"]})  # unmark: the instance stays stopped
+        raise
+    report_edit(cfg, entry["type"], old, new)
+    print(f"resume name={name} session={kept['session_id']}")
+    return reconcile_if_up(cfg)
+
+
 def lowest_free(indices, n):
     """The n lowest instance numbers not in indices (spawn refills holes first)."""
     taken, free, i = set(indices), [], 1
@@ -372,12 +424,44 @@ def cmd_stop(cfg, args):
                     "or run: hive stop TYPE --index N")
             changes.setdefault(hit[0]["type"], set()).add(hit[1])
     entries = {a["type"]: a for a in cfg["agents"]}
+    names = [f"{kind}-{cfg['prefix']}-{i}" for kind, remove in changes.items()
+             for i in sorted(remove)]
+    kept = kept_ids(cfg, names) if args.keep_session else None  # before the panes go
     new = {kind: [i for i in agent_indices(entries[kind]) if i not in remove]
            for kind, remove in changes.items()}
+    check_config_writable(cfg)
+    try:
+        if kept:
+            sessions.record(cfg, kept)
+        else:
+            sessions.forget(cfg, names)
+    except OSError as e:
+        die(f"cannot write {sessions.sessions_file(cfg)}: {e}", 1)
     set_indices_edit(cfg, new)
     for kind in new:
         report_edit(cfg, kind, agent_indices(entries[kind]), new[kind])
+    for name, sid in (kept or {}).items():
+        print(f"kept session name={name} session={sid}; resume with: "
+              f"hive spawn {parse_name(cfg['prefix'], name)[0]} --resume {name}")
     return reconcile_if_up(cfg)
+
+
+def kept_ids(cfg, names):
+    """{name: session id} for `stop --keep-session`; exit 1 if an instance has none."""
+    facts, running = {}, {}
+    if tmux.session_running(cfg):
+        running, _ = tmux.running_panes(cfg)
+        facts = pane_facts(cfg)
+    ids = {}
+    for name in names:
+        pane = running.get(name)
+        hive_session = facts.get(pane.pane_id, ("", None))[1] if pane else None
+        sid = sessions.current_id(cfg, name, hive_session)
+        if sid is None:
+            die(f"no session id for {name} (no status file session_id, no running pane with "
+                "@hive_session); nothing changed. Stop it without --keep-session", 1)
+        ids[name] = sid
+    return ids
 
 
 def add_parser(sub, name):
@@ -411,6 +495,9 @@ def add_parser(sub, name):
                        help="env for a new type, exported after [env] (repeatable)")
         p.add_argument("--trust", action="store_true",
                        help="record Claude Code workspace trust for the directory (only after the user agreed)")
+        p.add_argument("--resume", metavar="NAME",
+                       help="put back instance NAME of type TARGET, stopped with --keep-session, "
+                            "and launch it into its kept session")
     elif name == "stop":
         p = sub.add_parser("stop", help="remove workers (edits config, then reconciles)",
                            description="Remove workers: N of a type, highest index first, the "
@@ -421,3 +508,6 @@ def add_parser(sub, name):
         p.add_argument("-n", type=positive_int, help="number of workers to remove (default 1)")
         p.add_argument("--index", type=positive_int, action="append", metavar="N",
                        help="remove instance N of TYPE (repeatable)")
+        p.add_argument("--keep-session", action="store_true",
+                       help="record each removed instance's session id for 'hive spawn TYPE "
+                            "--resume NAME'")

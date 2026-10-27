@@ -10,6 +10,7 @@ Run `hive list` first; it is the truth about state.
 - `hive spawn TARGET [-n N] [--type TYPE] [--launcher NAME | --command CMD] [--config-dir PATH] [--env KEY=VALUE] [--arg ARG] [--trust]`: add N workers (default 1). TARGET is an existing type, an absolute path, `~/...`, or a directory name under `search_roots`. `--type` names a new type for the same directory. `--launcher NAME` takes the command and config dir from the registered launcher `NAME` (`--sandbox` is an alias) and cannot be combined with `--command` or `--config-dir`. `--env` (repeatable) and `--config-dir` set a new type only; a different value on an existing type is rejected, so give a new `--type`. Any `--env` shows the user a confirmation prompt. `--arg` (repeatable) adds a launcher flag such as `--fable`; write `--arg=--fable` for a value starting with `-`. Like `--env`, it sets a new type only, and any `--arg` that is not an arg string from `config.toml` shows the user a confirmation prompt.
 - `hive stop TARGET [-n N]`: remove N workers of an existing type (default 1). The highest-numbered one goes first.
 - `hive stop TYPE --index N [--index M]`: remove exactly worker N of TYPE (the `N` in its pane name `<type>-<machine>-<N>`); the others keep running. Use this form, not the pane name, because type names can contain `-`. `hive spawn TYPE` later refills the lowest free number.
+- `hive stop ... --keep-session`: the same stop forms, but each removed worker's session id is kept, so `hive spawn TYPE --resume NAME` (NAME the pane name, as `kept name=...` lines in `hive list` show it) later starts that worker again in its previous conversation. Use it when the user may want the worker back; a plain `hive stop` forgets the kept id.
 - `hive dirs [ROOT] [--depth N]`: read-only list of project directories under `search_roots` (or under ROOT, a root or a name), `--depth` up to 3. Records: `root=<path>`, then `dir=<path> name=<name> type=<type>|none`; `type` is the agent type already using that directory.
 - `hive roots [add PATH | remove PATH]`: show the search roots, or add/remove one in the config. `roots add` shows the user a confirmation prompt (see below).
 - `hive launchers`: list the registered launchers, one record per line, marking the default.
@@ -30,6 +31,8 @@ Run `hive list` first; it is the truth about state.
 | "two more X" | `hive spawn X -n 2` |
 | "one less X", "stop an X" | `hive stop X` |
 | "close X 1", "stop the first X", "I don't need X-1 any more" | `hive stop X --index 1` (check `hive list` for the number) |
+| "pause X 1", "stop X 1 but keep its session" | `hive stop X --index 1 --keep-session` |
+| "bring back X 1", "resume X 1", "continue the old X session" | `hive spawn X --resume <name>` with the name from a `kept name=...` line in `hive list` |
 | "start one in DIR" | follow "Starting a worker in a directory" below |
 | "what directories do I have (under X)?", "where is project Y?" | `hive dirs` (or `hive dirs X`, `hive dirs Y --depth 2`) |
 | "use the Y claude / launcher / sandbox" | `hive launchers`, pick the one named Y, run `hive spawn TARGET --launcher NAME` |
