@@ -654,7 +654,7 @@ the squash-merge.
 - Owns: `README.md`, `docs/**`, `tests/test_docs_links.py`.
 - Deps: R1, R2, R3, R4, R5, R6
 - Stages: write
-- Status: write
+- Status: done
 - Lead: writer
 - Accept: no stub lines; link check passes with no allowed-absent pages except
   `docs/upgrade.md` (R7); per-system pages state the versions observed and the Codex
@@ -754,6 +754,8 @@ the squash-merge.
 - 2026-10-27 R6 unit C (executor): spike on swarm Codex 0.164.0: project `.codex/hooks.json` in the queen dir keeps the pane on the shared daemon (no embedded-mode warning, `-a never -s danger-full-access` fine) but needs folder trust (`[projects]`) and hook trust stored as `[hooks.state."<key>"] trusted_hash` in the user's ~/.codex/config.toml, re-requested when the hook hash changes; stopped before hook trust per the safety contract, user config restored, panes unchanged on both machines
 - 2026-10-27 amend D-R6.10 (R6 child plan): a non-git queen dir with `.codex/` does show Codex's folder-trust prompt; "no trust prompt, hive seeds nothing" is wrong; seed_trust for the queen dir is acceptable
 - 2026-10-27 decision: user: allow Codex to persist the queen's folder and hook trust in ~/.codex/config.toml (one interactive "Trust all"; re-trust after guard changes is an accepted upgrade step); Codex queen ships; unit C resumed on feat/r6-codex-queen
+- 2026-10-27 R8b: done; README + 13 docs pages audited against `hive --help` 1.44, global options/nodes/list-status fields/config keys (indices, enabled, system) added, versions stated, OpenCode and pi deferred with reason, Claude resume section, link test keeps only docs/upgrade.md pending; critic codex round 1 REVISE, round 2 PASS; pytest 667 passed; landed on main as adaa5f0 (squash); deferred: docs/systems/codex.md:3,77 "no Codex queen" lines and docs/queen.md Codex row to R6 unit C; claude driver `versions` tuple (2.1.312) optional in R6 unit C; R7 install-URL/package swaps: README.md:5 and quick-start install line, docs/getting-started.md install block (2 lines) and `uv tool uninstall hive`, docs/development.md clone URL and `uv tool upgrade hive`
+- 2026-10-27 convention candidate (from R8b writer, for curator at close-out): docs quote hive's exact output and error strings in backticks instead of paraphrasing them; affects docs/ and README.md
 
 ## Todo
 
@@ -766,6 +768,6 @@ the squash-merge.
 - [x] R3 child plan written, done detection landed
 - [x] R4 resume landed
 - [ ] R6 child plan written, spikes passed (or blocked with Q2 answered), queen per system landed
-- [ ] R8b docs polish landed
+- [x] R8b docs polish landed
 - [ ] R7 release: VERSION 2.0, tag v2.0, rename, upgrade note, push (user confirms tag and push)
 - [ ] Verification section passes; production hives unchanged on both machines
