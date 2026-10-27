@@ -612,7 +612,7 @@ the squash-merge.
 - Owns: `hive/sessions.py`, `hive/workers.py`, `tests/test_sessions.py`, `docs/resume.md`.
 - Deps: R1, R3
 - Stages: execute
-- Status: execute
+- Status: done
 - Lead: executor
 - Accept: `record_and_load_roundtrip`; `stop_forgets_without_keep`; `stop_keep_session_records
   the id from the status file, else @hive_session`; `resume_without_hook_file_across_invocations:
@@ -741,6 +741,8 @@ the squash-merge.
 - 2026-10-27 decision: opencode gate fail (G1: `opencode pair --remote` relay did not work; user hypothesis: blocked on the work network); OpenCode deferred to the roadmap for this release; R1 Slice 5, R3 Slice 3 and R6 unit O dropped; source: user
 - 2026-10-27 decision: codex gate pass (G2: hive-launched codex pane on swarm visible and drivable from the paired app); pairing persisted across a daemon restart, only `codex remote-control start` was needed, no re-pair; `start` idempotency on a running daemon unverified, so hive checks for a running daemon before starting one; source: user
 - 2026-10-27 R1 (supervisor): Slice 6 (Codex driver) dispatched to executor on feat/r1-codex-driver; R3 Slice 4 and R6 unit C follow once it lands
+- 2026-10-27 R4: done; stop --keep-session records session ids (status file or @hive_session) in <profile>/state/sessions.json, spawn TYPE --resume NAME relaunches with the driver's resume args (--resume <id> for Claude; --session-id dropped since Claude rejects both), hooks carried, list shows kept sessions, hive/sessions.py, docs/resume.md; Step 0 real-Claude --settings smoke passed (all 6 hook events accepted); live resume verified with fake worker and real Claude at theme; pytest 620 passed; landed on main as a3b3ead (squash); deferred: user check of a resumed conversation in a logged-in config dir; guard --resume/--keep-session handling to R6 slice 2; docs/systems/claude.md resume line to R8b
+- 2026-10-27 R6 (supervisor): Slices 1-3 dispatched to executor on feat/r6-queen-core after R4 landed
 
 ## Todo
 
@@ -751,7 +753,7 @@ the squash-merge.
 - [ ] R1 child plan written, spike run, drivers landed
 - [ ] R5 multi-node landed, swarm test hive validated
 - [ ] R3 child plan written, done detection landed
-- [ ] R4 resume landed
+- [x] R4 resume landed
 - [ ] R6 child plan written, spikes passed (or blocked with Q2 answered), queen per system landed
 - [ ] R8b docs polish landed
 - [ ] R7 release: VERSION 2.0, tag v2.0, rename, upgrade note, push (user confirms tag and push)
