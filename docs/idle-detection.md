@@ -39,6 +39,10 @@ a guarantee.
 `waiting=<kind>` stays a separate field: a pane showing a dialog (trust, theme, login) is `busy`
 or `quiet`, and the kind says why.
 
+Codex panes always report the tmux fallback: hive passes Codex no hooks, because they would take
+the pane off the shared daemon that the Codex app reaches (see
+[Codex](systems/codex.md#no-hooks-no-session-id)).
+
 ## Files
 
 Each profile keeps the state under its profile dir (`~/.config/hive/` for the default profile,

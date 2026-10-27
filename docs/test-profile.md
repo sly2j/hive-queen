@@ -9,7 +9,7 @@ Select it with the global option `--profile NAME` or with `HIVE_PROFILE=NAME`; t
 | | default profile | profile `NAME` |
 |---|---|---|
 | config | `~/.config/hive/config.toml` | `~/.config/hive/profiles/NAME/config.toml` |
-| lock, queen dir | `~/.config/hive/.lock`, `.../hive/queen` | `.../profiles/NAME/.lock`, `.../profiles/NAME/queen` |
+| lock, queen dir, state | `~/.config/hive/.lock`, `.../hive/queen`, `.../hive/state` | `.../profiles/NAME/.lock`, `.../profiles/NAME/queen`, `.../profiles/NAME/state` |
 | `prefix` default | short hostname | `NAME` |
 | `session` default | `<prefix>-agents` | `<prefix>-agents` |
 | `tmux_socket` default | `hive` | `hive-NAME` |
@@ -49,4 +49,8 @@ uv run hive --profile test down    # kills only the hive-test server
 ```
 
 `--config-dir` points the trust check (and `--trust`) at a file under the profile, so
-`~/.claude.json` is never written.
+`~/.claude.json` is never written. A worker that also exercises the status hooks is in
+[Idle detection: Trying it without an account](idle-detection.md#trying-it-without-an-account).
+A Codex worker in a test profile still uses the default `~/.codex`: `--trust` writes its
+`config.toml`, and every launch shows up as a thread in the Codex app (see
+[Codex](systems/codex.md#limitations)).

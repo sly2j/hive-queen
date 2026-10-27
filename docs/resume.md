@@ -61,7 +61,9 @@ option than `--trust` (`-n`, `--type`, `--command`, `--arg`, `--config-dir`, `--
 
 ## Limits
 
-- Only Claude is available in this release.
+- Codex: hive cannot read a Codex session id, so `hive stop --keep-session` on a Codex instance
+  exits 1 and changes nothing. Continue a Codex conversation by hand, with `/resume` in a pane or
+  `codex resume` in a terminal; see [Codex](systems/codex.md#no-hooks-no-session-id).
 - Claude resumes a conversation it has a transcript of; a session that never got a prompt has
   none, and Claude reports that in the pane.
 - A wrapper that puts the session id in another form than `--session-id {session_id}` must not

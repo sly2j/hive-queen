@@ -1,33 +1,50 @@
 # Commands
 
+Global options come before the subcommand:
+
+| Option | Does |
+| --- | --- |
+| `--profile NAME` | Use the named profile: its own `config.toml`, lock, queen dir, state, tmux socket `hive-NAME` and unit `hive-NAME.service` under `<config dir>/hive/profiles/NAME`. Default: `$HIVE_PROFILE`, else the default profile. See [Test profile](test-profile.md). |
+| `--node NAME` | Run the command on the remote hive of `[[nodes]]` entry NAME over ssh (BatchMode) and return its exit code; `attach` is refused. See [Multi-node](multi-node.md). |
+| `--version` | Print `hive <version>`. |
+
 | Command | Does |
 | --- | --- |
-| `hive up` | Start the session if it is not running, with the queen first. Prints `started session <session> (tmux -L <socket>)`, then `started <name>  [<dir>]  <command>` per pane. If it is running, reconcile it with the config (same output as `hive reconcile`). Types whose `dir` is missing are skipped with a summary warning, and the exit code stays 0. If startup fails, hive removes the half-built session. |
+| `hive up` | Start the session if it is not running, with the queen first (unless `[queen] enabled = false`). Prints `started session <session> (tmux -L <socket>)`, then `started <name>  [<dir>]  <command>` per pane. If it is running, reconcile it with the config (same output as `hive reconcile`). Types whose `dir` is missing are skipped with a summary warning, and the exit code stays 0. With nothing to start (queen disabled, and either no agents or every agent dir missing) it prints `nothing to start: ...` and exits 0 without a session. If startup fails, hive removes the half-built session. For Codex panes it also makes sure the Codex remote-control daemon runs (see [Codex](systems/codex.md#the-daemon)). |
 | `hive down` | Kill the session, and the hive tmux server once it is empty. Prints `stopped session <session>`, or `session <session> not running` (exit 0). Works with a broken `config.toml`: it warns `config problem: ...` and takes `prefix`, `session` and `tmux_socket` from the config's parsable top-level lines, falling back to the defaults for names the config does not set. A name that is set but invalid is still an error (exit 2). |
 | `hive restart` | `systemctl --user restart hive.service` if that unit is active, else `down` then `up`. |
-| `hive status` | Prints `session <session>`, then one line per window and one per pane (`pane <index>: <title>  (<command>)`), then `attach: tmux -L <socket> attach -t <session>`. Exit 1 and `not running` if the session is not running. Works with a broken `config.toml`, like `down`. |
+| `hive status` | Prints `session <session>`, then one line per window and one per pane (`pane <index>: <title>  (<command>)`, followed by `state=... source=... age=...` for every pane hive manages, see [Idle detection](idle-detection.md)), then `attach: tmux -L <socket> attach -t <session>`. Exit 1 and `not running` if the session is not running. Works with a broken `config.toml`, like `down`. |
 | `hive attach` | Attach to the session (exit 1 if not running). |
 | `hive list` | Config and running state side by side, as `key=value` lines. See [hive list](#hive-list). |
 | `hive spawn TARGET [-n N] [--type TYPE] [--command CMD \| --launcher NAME] [--system NAME] [--config-dir PATH] [--env KEY=VALUE ...] [--arg ARG ...] [--trust] [--resume NAME]` | Add N workers of a type or a new directory, then reconcile; `--resume NAME` puts back one kept instance. See [hive spawn](#hive-spawn). |
 | `hive stop TARGET... [-n N] [--index N ...] [--keep-session]` | Remove workers of an existing type, then reconcile: N of them (default 1, highest indices first), or exactly the instances `--index` or their names give, while the others keep running. See [hive stop](#hive-stop). |
-| `hive reconcile [--dry-run]` | Make the running session match the config: adopt panes titled with a configured pane name (`adopted <name>`), start missing panes, stop managed panes no longer in the config (`stopped <name>`), leave unmanaged panes alone, never stop the queen. Prints `no changes` when there is nothing to do. `--dry-run` only prints `would start <name>`, `would stop <name>` and `would skip <name>: dir <dir> does not exist`. Exit 1 if not running. |
+| `hive reconcile [--dry-run]` | Make the running session match the config: adopt panes titled with a configured pane name (`adopted <name>`), start missing panes, stop managed panes no longer in the config (`stopped <name>`), leave unmanaged panes alone, never stop an enabled queen. Prints `no changes` when there is nothing to do. `--dry-run` only prints `would start <name>`, `would stop <name>` and `would skip <name>: dir <dir> does not exist`. Exit 1 if not running. |
 | `hive discover` | Run `[queen] discover` and print its output verbatim. See [hive discover](#hive-discover). |
-| `hive launchers` | List the known launchers, one `launcher name=N source=config\|discover default=yes\|no system=<name> config_dir=<path\|default> command=<cmd> [description=...] [shadowed=yes]` record each: the default first, then the registry, then `[queen] discover` records. See [Launchers](launchers.md). |
-| `hive launchers add NAME COMMAND [--system NAME] [--config-dir PATH] [--description TEXT]` | Append a `[[launchers]]` entry to `config.toml`. NAME matches `[a-z0-9][a-z0-9-]*` and is not already a registry or discover name (exit 2). `--system` records the launcher's system (default `[defaults] system`) and COMMAND is checked by that driver (for Claude it must contain `{name}` and `--remote-control`). Its executable (first word) must exist on `PATH` or as a path (exit 2) and not be under a `secrets`/`private` path (exit 3). hive never runs it. The config is unchanged on any error. The first launcher added becomes `[defaults] launcher` when none is set. |
+| `hive launchers [list]` | List the known launchers, one `launcher name=N source=config\|discover default=yes\|no system=<name> config_dir=<path\|default> command=<cmd> [description=...] [shadowed=yes]` record each: the default first, then the registry, then `[queen] discover` records. See [Launchers](launchers.md). |
+| `hive launchers add NAME COMMAND [--system NAME] [--config-dir PATH] [--description TEXT]` | Append a `[[launchers]]` entry to `config.toml`. NAME matches `[a-z0-9][a-z0-9-]*` and is not already a registry or discover name (exit 2). `--system NAME` records the launcher's system (default `[defaults] system`) and COMMAND is checked by that driver (for Claude it must contain `{name}` and `--remote-control`). Its executable (first word) must exist on `PATH` or as a path (exit 2) and not be under a `secrets`/`private` path (exit 3). hive never runs it. The config is unchanged on any error. The first launcher added becomes `[defaults] launcher` when none is set. |
 | `hive launchers default NAME` | Write `[defaults] launcher = NAME`. NAME is a registry or discover name (exit 2 otherwise). |
 | `hive dirs [ROOT] [--depth N]` | Read-only: list the directories under the search roots. See [hive dirs](#hive-dirs). |
 | `hive roots [add PATH \| remove PATH]` | Show `search_roots`, or add or remove one. See [hive roots](#hive-roots). |
-| `hive inspect-launcher COMMAND [--system NAME]` | Read-only: show a launcher's `CLAUDE_CONFIG_DIR` evidence. See [hive inspect-launcher](#hive-inspect-launcher). |
+| `hive nodes` | List the `[[nodes]]` entries, one `node name=<name> host=<host> hive=<path> profile=<name\|default>[ description=...]` line each (nothing when there are none). Run a command on one with `hive --node NAME COMMAND ...`. See [Multi-node](multi-node.md). |
+| `hive inspect-launcher COMMAND [--system NAME]` | Read-only: show a launcher's config-dir evidence (`CLAUDE_CONFIG_DIR` for Claude). See [hive inspect-launcher](#hive-inspect-launcher). |
 | `hive init` | Write the example config if none exists and print `wrote <path>; it has no agents yet, so 'hive up' starts only the queen; add agents with 'hive spawn DIR' or by editing it` (else print `<path> already exists`). Then print `config=<path> session=<session> socket=<socket>; set tmux_socket in the config to keep a test or isolated config off your real hive's tmux server`. The example defines no agents; the commented `[[agents]]` entry shows the keys. |
-| `hive install-service [--enable]` | Write `~/.config/systemd/user/hive.service` and reload; `--enable` also runs `enable --now`. Without `--enable` it prints the follow-up commands `systemctl --user enable --now hive.service` and `loginctl enable-linger $USER`. Linux only (see [Run at login on macOS](service.md#run-at-login-on-macos)). Needs `systemctl` (else `systemctl not found`, exit 1) and a valid config. See [systemd service](service.md#systemd-service). |
+| `hive install-service [--enable]` | Write `~/.config/systemd/user/hive.service` (`hive-NAME.service` for a named profile) and reload; `--enable` also runs `enable --now`. Without `--enable` it prints the follow-up commands `systemctl --user enable --now hive.service` and `loginctl enable-linger $USER`. Linux only (see [Run at login on macOS](service.md#run-at-login-on-macos)). Needs `systemctl` (else `systemctl not found`, exit 1) and a valid config. See [systemd service](service.md#systemd-service). |
 | `hive uninstall-service` | Disable, remove the unit, reload. Prints `not installed: <path> does not exist` and exits 0 if there is no unit. Linux only, like `install-service`. |
-| `hive --version` | Print `hive <version>`. |
 
 ## hive list
 
 `hive list`
 
-Config and running state as `key=value` lines, in this order: a header `session=... socket=... running=yes|no config=<path>`; the `queen` line; one `agent type=... dir=... count=... [indices=<N,...>] running=... command=... args=<json list>` line per type (`count` is the number of instances, `indices` their numbers when they are not `1..count`; ` dir_missing=yes` when the dir is gone); one `pane name=<name> type=<type> id=<pane id>` line per running managed pane (with ` waiting=<kind>` when its screen shows a blocking dialog; for Claude `trust`, `theme`, `login` or `rc_consent`, see [Claude](systems/claude.md#dialogs-and-waiting); for Codex `trust`, `hooks_review` or `login`, see [Codex](systems/codex.md#dialogs-and-waiting)); one `unmanaged pane=... window=... title=...` line per unmanaged pane; one `kept name=<name> session=<id> resume=no|pending` line per session kept by `hive stop --keep-session` (see [Resume](resume.md)); `drift start=<names|none> stop=<names|none>` when the session differs from the config; then `search_roots=<comma-separated>` and `discover=<command>`. The `queen`, `agent` and `pane` lines carry `system=<name>`. The `queen` and `agent` lines carry `trusted=yes|no trust_file=<path>`.
+Config and running state as `key=value` lines, in this order:
+
+- a header `session=... socket=... running=yes|no config=<path>`;
+- the `queen name=<name> running=yes|no dir=<dir> trusted=yes|no trust_file=<path> enabled=yes|no system=<name>` line;
+- one `agent type=... dir=... count=... [indices=<N,...>] running=... command=... args=<json list> trusted=yes|no trust_file=<path> system=<name>` line per type (`count` is the number of instances, `indices` their numbers when they are not `1..count`; ` dir_missing=yes` when the dir is gone);
+- one `pane name=<name> type=<type> id=<pane id> system=<name> state=<state> source=<source> age=<seconds>` line per running managed pane (`state`, `source` and `age` per [Idle detection](idle-detection.md)), with ` waiting=<kind>` when its screen shows a blocking dialog: for Claude `trust`, `theme`, `login` or `rc_consent`, see [Claude](systems/claude.md#dialogs-and-waiting); for Codex `trust`, `hooks_review` or `login`, see [Codex](systems/codex.md#dialogs-and-waiting);
+- one `unmanaged pane=... window=... title=...` line per unmanaged pane;
+- one `kept name=<name> session=<id> resume=no|pending` line per session kept by `hive stop --keep-session` (see [Resume](resume.md));
+- `drift start=<names|none> stop=<names|none>` when the session differs from the config;
+- then `search_roots=<comma-separated>` and `discover=<command>`.
 
 ## hive spawn
 
@@ -51,7 +68,7 @@ A TARGET that equals a configured type is always that type, even when it also re
 
 The remaining instances are written back as `count = N` when they are `1..N`, else as `indices = [2, 3]` in the type's `[[agents]]` entry (`count` and `indices` are exclusive). `hive spawn` fills the lowest free numbers first. Prints one `config agent=<type> count=<old>-><new> [indices=<N,...>] file=<path>` line per type changed.
 
-`--keep-session` records each removed instance's session id in `<profile dir>/state/sessions.json` and prints `kept session name=<name> session=<id>; resume with: hive spawn <type> --resume <name>` per instance; exit 1 with no changes when an instance has no session id. Without it, stop forgets the kept ids of the instances it removes. See [Resume](resume.md).
+`--keep-session` records each removed instance's session id in `<profile dir>/state/sessions.json` and prints `kept session name=<name> session=<id>; resume with: hive spawn <type> --resume <name>` per instance; exit 1 with no changes when an instance has no session id, which is always the case for a Codex instance (see [Codex](systems/codex.md#no-hooks-no-session-id)). Without it, stop forgets the kept ids of the instances it removes. See [Resume](resume.md).
 
 ## hive discover
 
@@ -75,7 +92,7 @@ Without arguments print `root=<path>` per search root (`roots=none` if unset). `
 
 `hive inspect-launcher COMMAND [--system NAME]`
 
-Read-only look at the launcher of a launch command (one argument, e.g. `"claude-supervisor run api -- -n {name}"`): resolves its first word on `PATH` and through symlinks, and reads it only if both paths are under `inspect_roots` and not under a `secrets`/`private` path (else `refused: ...`, exit 3; `not found: ...` for a missing, non-regular or unreadable file, exit 2). Prints `path=... resolved=... kind=binary`, or for a script `path=... resolved=... kind=script shebang=<first line> lines=<n>` (plus `truncated=yes` beyond 1 MiB); then for scripts the lines mentioning `CLAUDE_CONFIG_DIR`, `claude`, `exec`, `env`, `export`, `HOME=` or `XDG_CONFIG_HOME` as `line=N text=...` (secret-like lines as `line=N redacted=secret-like`), at most 200, then `more=yes`; and last `env CLAUDE_CONFIG_DIR=<value>|unset` from hive's own environment. `--system NAME` (default `[defaults] system`) picks the driver whose line pattern selects the printed lines; for Claude it is the list above. Never runs the launcher.
+Read-only look at the launcher of a launch command (one argument, e.g. `"claude-supervisor run api -- -n {name}"`): resolves its first word on `PATH` and through symlinks, and reads it only if both paths are under `inspect_roots` and not under a `secrets`/`private` path (else `refused: ...`, exit 3; `not found: ...` for a missing, non-regular or unreadable file, exit 2). Prints `path=... resolved=... kind=binary`, or for a script `path=... resolved=... kind=script shebang=<first line> lines=<n>` (plus `truncated=yes` beyond 1 MiB); then for scripts the lines mentioning `CLAUDE_CONFIG_DIR`, `claude`, `exec`, `env`, `export`, `HOME=` or `XDG_CONFIG_HOME` as `line=N text=...` (secret-like lines as `line=N redacted=secret-like`), at most 200, then `more=yes`; and last `env CLAUDE_CONFIG_DIR=<value>|unset` from hive's own environment. `--system NAME` (default `[defaults] system`) picks the driver whose line pattern selects the printed lines and whose config-dir variable the last line reports (`CODEX_HOME` for Codex); for Claude it is the list above. Never runs the launcher.
 
 Errors go to stderr as `hive: error: <message>`, warnings as `hive: warning: <message>`.
 
@@ -84,9 +101,9 @@ Errors go to stderr as `hive: error: <message>`, warnings as `hive: warning: <me
 | Code | Meaning |
 | --- | --- |
 | 0 | OK. Also `hive down` when the session is not running. |
-| 1 | Runtime error (tmux or systemctl missing or failed, lock timeout, file not writable), or the session is not running (`status`, `attach`, `reconcile`). `hive dirs` when no root could be listed. |
-| 2 | Usage or config error. Also `hive roots remove` with a path not in `search_roots`, and `inspect-launcher` `not found`. |
+| 1 | Runtime error (tmux or systemctl missing or failed, lock timeout, file not writable), or the session is not running (`status`, `attach`, `reconcile`). `hive dirs` when no root could be listed. `hive stop --keep-session` when an instance has no session id. `hive --node NAME` when ssh itself fails (`node NAME unreachable`). |
+| 2 | Usage or config error. Also `hive roots remove` with a path not in `search_roots`, `inspect-launcher` `not found`, `spawn` of a new type whose system binary is older than the driver's minimum version, `spawn --resume` without a matching kept session, `hive --node NAME attach`, and a named profile whose `tmux_socket` is the default profile's. |
 | 3 | Untrusted or refused: `spawn` of an untrusted directory without `--trust`, and `refused:` from `dirs`, `roots add` and `inspect-launcher`. |
 | 130 | Interrupted (Ctrl-C). |
 
-`hive discover` returns the discover command's exit code, `hive attach` returns tmux's, and `hive restart` through systemd returns `systemctl`'s.
+`hive discover` returns the discover command's exit code, `hive attach` returns tmux's, `hive restart` through systemd returns `systemctl`'s, and `hive --node NAME ...` returns the remote hive's.

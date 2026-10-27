@@ -12,11 +12,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Pages owned by feature packages that may not have landed yet (docs ownership, plan D11).
 PENDING_PAGES = {
-    "docs/test-profile.md",
-    "docs/idle-detection.md",
     "docs/upgrade.md",
 }
-PENDING_DIRS = ("docs/systems/",)
+PENDING_DIRS = ()
 
 FENCE = re.compile(r"^ {0,3}(```|~~~).*?^ {0,3}\1[^\n]*$", re.M | re.S)
 INLINE_CODE = re.compile(r"`[^`\n]*`")
@@ -84,7 +82,7 @@ def test_checker_detects_broken_links(tmp_path):
     (tmp_path / "README.md").write_text(
         "# T\n\n```sh\n[fenced](#y)\n```\n\n## Two words\n\n[ok](#two-words) [ok](docs/a.md#part-b) "
         "[bad](docs/missing.md) [bad](docs/a.md#nope) [pending](docs/upgrade.md) "
-        "[pending](docs/systems/codex.md) [ext](https://example.org) `[code](#x)`\n"
+        "[ext](https://example.org) `[code](#x)`\n"
     )
     (tmp_path / "docs" / "a.md").write_text("# A\n\n## Part B\n\n[up](../README.md#two-words)\n")
     problems = broken_links(tmp_path)

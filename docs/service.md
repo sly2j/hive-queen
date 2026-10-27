@@ -4,7 +4,7 @@
 
 Linux only. On macOS, `hive install-service` and `uninstall-service` exit 1 (systemd services are Linux-only); see [Run at login on macOS](#run-at-login-on-macos).
 
-`hive install-service --enable` writes `~/.config/systemd/user/hive.service`, reloads systemd and starts the unit; it then starts at login (at boot only with `loginctl enable-linger $USER`). Without `--enable` it writes and reloads only, and prints those two commands (`systemctl --user enable --now hive.service`, `loginctl enable-linger $USER`). It checks for `systemctl` first and exits 1 with `systemctl not found` if it is missing. The unit always goes to `~/.config/systemd/user`, where the systemd user manager looks. If `XDG_CONFIG_HOME` is set to something other than `~/.config` when you install, the unit gets an `Environment=XDG_CONFIG_HOME=...` line, so the service reads the same config as your shell.
+`hive install-service --enable` writes `~/.config/systemd/user/hive.service` (for a named profile `hive-NAME.service`, running `hive --profile NAME up` and `down`), reloads systemd and starts the unit; it then starts at login (at boot only with `loginctl enable-linger $USER`). Without `--enable` it writes and reloads only, and prints those two commands (`systemctl --user enable --now hive.service`, `loginctl enable-linger $USER`). It checks for `systemctl` first and exits 1 with `systemctl not found` if it is missing. The unit always goes to `~/.config/systemd/user`, where the systemd user manager looks. If `XDG_CONFIG_HOME` is set to something other than `~/.config` when you install, the unit gets an `Environment=XDG_CONFIG_HOME=...` line, so the service reads the same config as your shell.
 
 `ExecStart` and `ExecStop` use `%h/.local/bin/hive`, or the `hive` found on `PATH` if it is elsewhere. `After=` is `network-online.target` plus the units in `[service] after`. With the defaults the unit is:
 
@@ -34,6 +34,8 @@ WantedBy=default.target
 `KillMode=control-group` is the default, kept explicit. tmux built with systemd support (Debian's 3.5a is) moves each pane's processes into its own `tmux-spawn-*.scope` unit. `systemctl --user status hive` then lists only the tmux server, and the cgroup kill does not reach the agents; they end when `ExecStop` (`hive down`) kills the session and the panes get SIGHUP. `hive down` alone leaves the unit "active" (`RemainAfterExit`).
 
 Logs: `journalctl --user -u hive`, or `journalctl --user-unit hive` where journald keeps no per-user files (`Storage=volatile`).
+
+A Codex remote-control daemon that `hive up` starts under the unit belongs to it and stops with it; the next `hive up` starts it again (see [Codex: The daemon](systems/codex.md#the-daemon)).
 
 ## Run at login on macOS
 
