@@ -545,3 +545,50 @@ def test_spawn_launcher_type_collision_refused(hive, tmp_path):
     r = h.run("spawn", str(api), "--trust")
     assert r.returncode == 2 and "already exists" in r.stderr, r.stderr
     assert h.config.read_bytes() == before
+
+
+def test_second_profile_is_isolated(hive, tmp_path):
+    """A named profile on its own socket: spawn, up, list, down never touch the default one."""
+    h = hive
+    assert h.run("up").returncode == 0
+    before = h.tmux("list-panes", "-a", "-F", "#{pane_id} #{@hive_name}").stdout
+    sock = f"{SOCKET}-b"
+    pdir = tmp_path / "hive" / "profiles" / "b"
+    pdir.mkdir(parents=True)
+    (pdir / "config.toml").write_text(
+        f'tmux_socket = "{sock}"\nlogin_shell = false\nshell = "/bin/sh"\n\n'
+        '[defaults]\ncommand = "sh -c \'echo {name} --remote-control; exec sleep 600\'"\n\n'
+        "[queen]\nenabled = false\n")
+
+    def b(*args):
+        return h.run("--profile", "b", *args)
+
+    def b_tmux(*args):
+        return subprocess.run(["tmux", "-L", sock, *args], capture_output=True, text=True)
+    try:
+        r = b("spawn", str(tmp_path / "b"), "--config-dir", str(pdir / "claude"), "--trust", "-n", "2")
+        assert r.returncode == 0 and "session not running" in r.stdout, r.stderr
+        assert not (tmp_path / ".claude.json").exists() and (pdir / "claude" / ".claude.json").exists()
+        r = b("up")
+        assert r.returncode == 0 and "started b-b-1" in r.stdout and "hive-queen" not in r.stdout, r.stderr
+        out = b("list").stdout.splitlines()
+        assert out[0].startswith(f"session=b-agents socket={sock} running=yes")
+        assert out[1].startswith("queen name=hive-queen-b running=no") and out[1].endswith("enabled=no")
+        assert sum(line.startswith("pane name=b-b-") for line in out) == 2
+        panes = b_tmux("list-panes", "-a", "-F", "#{@hive_name}").stdout.split()
+        assert sorted(panes) == ["b-b-1", "b-b-2"]
+        # the panes address their own profile with plain `hive`
+        for _ in range(50):
+            screen = b_tmux("capture-pane", "-p", "-t", "=b-agents:b-b").stdout
+            if "HIVE_PROFILE=b" in screen:
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError(screen)
+        r = b("down")
+        assert r.returncode == 0 and "stopped session b-agents" in r.stdout, r.stderr
+        assert b_tmux("list-sessions").returncode != 0
+    finally:
+        b_tmux("kill-server")
+    assert h.tmux("list-panes", "-a", "-F", "#{pane_id} #{@hive_name}").stdout == before
+    assert "running=yes" in h.run("list").stdout.splitlines()[0]

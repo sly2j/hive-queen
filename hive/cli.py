@@ -31,7 +31,9 @@ from hive.reconcile import (RESERVED_TYPES, Existing, New, ResolveError, Running
 from hive.trust import (TrustError, is_trusted, looks_like_trust_prompt, seed_trust,
                         trust_file, trust_root)
 
-UNIT_NAME = "hive.service"
+DEFAULT_SOCKET = "hive"
+# A named profile (--profile NAME / HIVE_PROFILE): own config, lock, queen dir, socket, unit.
+PROFILE_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 TOP_KEYS = {"prefix", "session", "tmux_socket", "login_shell", "shell",
             "defaults", "env", "service", "agents", "search_roots", "queen",
@@ -39,7 +41,7 @@ TOP_KEYS = {"prefix", "session", "tmux_socket", "login_shell", "shell",
 LAUNCHER_KEYS = {"name", "command", "config_dir", "description"}
 LAUNCHER_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 AGENT_KEYS = {"type", "dir", "count", "command", "args", "env", "config_dir"}
-QUEEN_KEYS = {"command", "args", "discover", "env", "config_dir"}
+QUEEN_KEYS = {"command", "args", "discover", "env", "config_dir", "enabled"}
 # Used when neither [queen] nor [defaults] sets a command.
 DEFAULT_QUEEN_COMMAND = "claude -n {name} --remote-control {name} --permission-mode auto"
 # Tool allowlist for the queen; the guard hook enforces the same set.
@@ -60,8 +62,8 @@ After={after}
 Type=oneshot
 RemainAfterExit=yes
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-{extra_env}ExecStart={exe} up
-ExecStop={exe} down
+{extra_env}ExecStart={exe}{profile} up
+ExecStop={exe}{profile} down
 # The tmux server forked by `hive up` stays in this cgroup while the unit is
 # active. tmux may move pane processes into their own tmux-spawn-*.scope units;
 # `hive down` ends them by killing the session.
@@ -89,8 +91,59 @@ def config_home():
     return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
 
 
+_profile_option = None  # --profile, set by run()
+
+
+def profile_name():
+    """The named profile (--profile, else HIVE_PROFILE), or None for the default profile."""
+    name = _profile_option if _profile_option is not None else os.environ.get("HIVE_PROFILE") or None
+    if name is None or name == "default":
+        return None
+    if not PROFILE_RE.fullmatch(name):
+        raise ConfigError(f"profile name {name!r} must match {PROFILE_RE.pattern}")
+    return name
+
+
+def profile_dir():
+    base = config_home() / "hive"
+    name = profile_name()
+    return base if name is None else base / "profiles" / name
+
+
 def config_path():
-    return config_home() / "hive" / "config.toml"
+    return profile_dir() / "config.toml"
+
+
+def default_socket():
+    """The default profile's tmux socket, read leniently; "hive" when unreadable or absent."""
+    path = config_home() / "hive" / "config.toml"
+    try:
+        raw = read_config(path)
+    except ConfigError:
+        # Only the tmux_socket line: a broken prefix line must not hide the real socket.
+        raw = top_level_names(path, ("tmux_socket",))
+    sock = raw.get("tmux_socket", DEFAULT_SOCKET)
+    return sock if isinstance(sock, str) and sock else DEFAULT_SOCKET
+
+
+def socket_file(sock):
+    """Where tmux -L puts the socket, normalized so aliases like ./hive compare equal."""
+    base = f"{os.environ.get('TMUX_TMPDIR') or '/tmp'}/tmux-{os.getuid()}"
+    return os.path.normpath(f"{base}/{sock}")  # tmux appends the name, even "/hive"
+
+
+def refuse_socket_collision(sock, path):
+    """A named profile must never reach the default profile's (production) tmux server."""
+    if profile_name() is None:
+        return
+    if socket_file(sock) in (socket_file(DEFAULT_SOCKET), socket_file(default_socket())):
+        raise ConfigError(f"{path}: tmux_socket {sock!r} is the default profile's socket; "
+                          f"profile {profile_name()!r} needs its own (default hive-{profile_name()})")
+
+
+def unit_name():
+    name = profile_name()
+    return "hive.service" if name is None else f"hive-{name}.service"
 
 
 LOCK_WAIT = 30.0
@@ -105,7 +158,7 @@ def hold_lock(required=True):
     global _lock
     if _lock is not None:
         return
-    path = config_home() / "hive" / ".lock"
+    path = profile_dir() / ".lock"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         f = open(path, "a")
@@ -256,16 +309,18 @@ def lenient_config():
         check(raw[key], key, path)
         return raw[key]
 
-    prefix = pick("prefix", socket.gethostname().split(".")[0])
+    profile = profile_name()
+    prefix = pick("prefix", profile or socket.gethostname().split(".")[0])
     session = pick("session", f"{prefix}-agents")
-    sock = pick("tmux_socket", "hive", check_socket)
-    return ({"prefix": prefix, "session": session, "socket": sock,
+    sock = pick("tmux_socket", f"hive-{profile}" if profile else DEFAULT_SOCKET, check_socket)
+    refuse_socket_collision(sock, path)
+    return ({"prefix": prefix, "session": session, "socket": sock, "profile": profile,
              "pane_shell": None, "env": {}, "agents": [], "config_path": str(path)},
             f"{problem}\n  using session {session} on socket {sock} (from the parsable lines "
             "of the config, else the defaults)")
 
 
-def top_level_names(path):
+def top_level_names(path, keys=("prefix", "session", "tmux_socket")):
     """prefix, session and tmux_socket from single top-level lines of a config TOML cannot parse.
 
     A typo elsewhere in the file must not send `down` to the default socket when the
@@ -278,7 +333,7 @@ def top_level_names(path):
     for line in lines:
         if line.lstrip().startswith("["):
             break  # top-level keys end at the first table
-        m = re.match(r"\s*(prefix|session|tmux_socket)\s*=", line)
+        m = re.match(rf"""\s*["']?({'|'.join(keys)})["']?\s*=""", line)
         if m:
             try:
                 found.update(tomllib.loads(line))
@@ -294,15 +349,17 @@ def parse_config():
 
     check_keys(raw, TOP_KEYS, "top level", path)
 
-    prefix = raw.get("prefix", socket.gethostname().split(".")[0])
+    profile = profile_name()
+    prefix = raw.get("prefix", profile or socket.gethostname().split(".")[0])
     check_name(prefix, "prefix", path)
     # The machine part of every instance name; keep it to the type characters.
     if not TYPE_RE.fullmatch(prefix):
         raise ConfigError(f"{path}: prefix {prefix!r} may only contain letters, digits, '_' and '-'")
     session = raw.get("session", f"{prefix}-agents")
     check_name(session, "session", path)
-    tmux_socket = raw.get("tmux_socket", "hive")
+    tmux_socket = raw.get("tmux_socket", f"hive-{profile}" if profile else DEFAULT_SOCKET)
     check_socket(tmux_socket, "tmux_socket", path)
+    refuse_socket_collision(tmux_socket, path)
 
     login_shell = raw.get("login_shell", True)
     if not isinstance(login_shell, bool):
@@ -379,6 +436,9 @@ def parse_config():
     queen_env = queen.get("env", {})
     check_env(queen_env, "queen.env", path)
     queen_config_dir = check_config_dir(queen, "queen", path)
+    queen_enabled = queen.get("enabled", True)
+    if not isinstance(queen_enabled, bool):
+        raise ConfigError(f"{path}: 'queen.enabled' must be true or false")
 
     raw_agents = raw.get("agents", [])
     check_type(raw_agents, list, "agents", path)
@@ -432,6 +492,7 @@ def parse_config():
         "prefix": prefix,
         "session": session,
         "socket": tmux_socket,
+        "profile": profile,
         # Pane command: a login shell, or None for tmux's default-command.
         "pane_shell": shlex.join([shell, "-l"]) if login_shell else None,
         "env": env,
@@ -439,9 +500,9 @@ def parse_config():
         "agents": agents,
         "search_roots": search_roots,
         "inspect_roots": inspect_roots,
-        "queen": {"type": "queen", "dir": str(config_home() / "hive" / "queen"),
+        "queen": {"type": "queen", "dir": str(profile_dir() / "queen"),
                   "command": queen_command_line(queen_command, queen_args), "args": queen_args,
-                  "env": queen_env, "config_dir": queen_config_dir},
+                  "env": queen_env, "config_dir": queen_config_dir, "enabled": queen_enabled},
         "discover": discover,
         "launchers": launchers,
         "default_launcher": default_launcher,
@@ -502,7 +563,9 @@ CLAUDE_SESSION_ENV = {"CLAUDE_CONFIG_DIR", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT
 
 
 def tmux_env():
-    return {k: v for k, v in os.environ.items() if k not in CLAUDE_SESSION_ENV}
+    # HIVE_PROFILE too: a named profile's panes export their own, others must not inherit one.
+    return {k: v for k, v in os.environ.items()
+            if k not in CLAUDE_SESSION_ENV and k != "HIVE_PROFILE"}
 
 
 def tmux(cfg, *args, check=True):
@@ -527,6 +590,9 @@ def shell_line(cfg, directory, command, env=None):
         # Escape what is special inside double quotes; leave $ so variables expand.
         escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
         parts.append(f'export {key}="{escaped}"')
+    if cfg.get("profile"):
+        # Plain `hive` in the pane (a queen or worker) then addresses this profile.
+        parts.append(f"export HIVE_PROFILE={cfg['profile']}")
     parts.append(f"cd {shlex.quote(directory)}")
     parts.append(command)
     return " && ".join(parts)
@@ -709,7 +775,7 @@ def reconcile(cfg, dry_run=False, announce_idle=True):
     queen = queen_name(cfg["prefix"])
     running, _ = running_panes(cfg)
     wanted = desired_panes(cfg)
-    to_start, to_stop = plan(wanted, running, queen)
+    to_start, to_stop = plan(wanted, running, kept_queen(cfg))
     windows_of = {p.name: p.window for p in wanted}
     adopted = [r for r in running.values() if r.adopted]
     acted = False
@@ -768,16 +834,28 @@ def reconcile(cfg, dry_run=False, announce_idle=True):
     return 0
 
 
+def kept_queen(cfg):
+    """The queen's name when it is enabled (reconcile never stops it), else None."""
+    return queen_name(cfg["prefix"]) if cfg["queen"]["enabled"] else None
+
+
 def cmd_up(cfg, args):
     if session_running(cfg):
         return reconcile(cfg)
 
     session = cfg["session"]
-    first = desired_panes(cfg)[0]  # the queen
+    desired = desired_panes(cfg)
+    # The queen when enabled, else the first worker whose dir exists.
+    first = next((p for p in desired if p.type == "queen" or Path(p.dir).is_dir()), None)
+    if first is None:
+        print("nothing to start: queen disabled and no agents" if not desired else
+              "nothing to start: queen disabled and every agent dir is missing; see 'hive list'")
+        return 0
     warn_untrusted(cfg, first)
     preflight(cfg, first)
     try:
-        materialize_queen(cfg)
+        if first.type == "queen":
+            materialize_queen(cfg)
         shell = [cfg["pane_shell"]] if cfg["pane_shell"] else []
         # Detached size is fixed so tiled panes are not tiny; attach resizes.
         out = tmux(cfg, "new-session", "-d", "-P", "-F", "#{pane_id}", "-s", session,
@@ -812,14 +890,14 @@ def cmd_down(cfg, args):
 def systemd_unit_active():
     if not shutil.which("systemctl"):
         return False
-    result = subprocess.run(["systemctl", "--user", "is-active", "--quiet", UNIT_NAME])
+    result = subprocess.run(["systemctl", "--user", "is-active", "--quiet", unit_name()])
     return result.returncode == 0
 
 
 def cmd_restart(cfg, args):
     if systemd_unit_active():
         # Restart through systemd so the tmux server stays in the service cgroup.
-        return subprocess.run(["systemctl", "--user", "restart", UNIT_NAME]).returncode
+        return subprocess.run(["systemctl", "--user", "restart", unit_name()]).returncode
     hold_lock()
     cmd_down(cfg, args)
     return cmd_up(cfg, args)
@@ -866,7 +944,8 @@ def cmd_list(cfg, args):
     print(f"session={cfg['session']} socket={cfg['socket']} running={'yes' if up else 'no'} "
           f"config={cfg['config_path']}")
     print(f"queen name={queen} running={'yes' if queen in running else 'no'} "
-          f"dir={cfg['queen']['dir']} {trust_fields(cfg, cfg['queen'])}")
+          f"dir={cfg['queen']['dir']} {trust_fields(cfg, cfg['queen'])} "
+          f"enabled={'yes' if cfg['queen']['enabled'] else 'no'}")
     for agent in cfg["agents"]:
         n = sum(1 for r in running.values() if r.type == agent["type"])
         print(f"agent type={agent['type']} dir={agent['dir']} count={agent['count']} "
@@ -880,7 +959,7 @@ def cmd_list(cfg, args):
     for u in unmanaged:
         print(f"unmanaged pane={u['pane']} window={u['window']} title={quote(u['title'])}")
     if up:
-        to_start, to_stop = plan(desired_panes(cfg), running, queen)
+        to_start, to_stop = plan(desired_panes(cfg), running, kept_queen(cfg))
         if to_start or to_stop:
             print(f"drift start={','.join(p.name for p in to_start) or 'none'} "
                   f"stop={','.join(r.name for r in to_stop) or 'none'}")
@@ -1332,7 +1411,7 @@ def cmd_init(args):
 
 def unit_path():
     # Where the systemd user manager looks, whatever XDG_CONFIG_HOME says here.
-    return Path.home() / ".config" / "systemd" / "user" / UNIT_NAME
+    return Path.home() / ".config" / "systemd" / "user" / unit_name()
 
 
 def systemctl(*args, check=True):
@@ -1386,16 +1465,17 @@ def cmd_install_service(args):
     path = unit_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(UNIT_TEMPLATE.format(after=after, exe=service_exe(),
+        profile = f" --profile {profile_name()}" if profile_name() else ""
+        path.write_text(UNIT_TEMPLATE.format(after=after, exe=service_exe(), profile=profile,
                                              extra_env=service_extra_env()))
     except OSError as e:
         die(f"cannot write {path}: {e.strerror or e}", 1)
     print(f"wrote {path}")
     systemctl("daemon-reload")
     if args.enable:
-        systemctl("enable", "--now", UNIT_NAME)
+        systemctl("enable", "--now", unit_name())
     else:
-        print(f"next: systemctl --user enable --now {UNIT_NAME}\n"
+        print(f"next: systemctl --user enable --now {unit_name()}\n"
               "to start at boot without logging in: loginctl enable-linger $USER")
     return 0
 
@@ -1406,7 +1486,7 @@ def cmd_uninstall_service(args):
     if not path.exists():
         print(f"not installed: {path} does not exist")
         return 0
-    systemctl("disable", "--now", UNIT_NAME, check=False)
+    systemctl("disable", "--now", unit_name(), check=False)
     try:
         path.unlink()
     except OSError as e:
@@ -1462,6 +1542,10 @@ def build_parser():
         prog="hive", description="Run N instances of each agent kind in tmux panes.",
         epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"hive {get_version()}")
+    parser.add_argument("--profile", metavar="NAME",
+                        help="use the named profile <config dir>/hive/profiles/NAME (own config, "
+                             "lock, queen dir, tmux socket hive-NAME, unit hive-NAME.service); "
+                             "default: $HIVE_PROFILE, else the default profile")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("up", help="start the session, or reconcile it with the config if running",
                    description="Start the session with the queen and every configured agent, "
@@ -1543,8 +1627,11 @@ LOCKED = ("up", "down", "spawn", "stop", "reconcile", "roots")
 
 
 def run():
+    global _profile_option
     parser = build_parser()
     args = parser.parse_args()
+    _profile_option = args.profile
+    profile_name()  # an invalid name exits 2 before anything runs
     if args.command is None:
         parser.print_help()
         return 2

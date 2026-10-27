@@ -39,13 +39,15 @@ def queen_name(prefix):
 
 
 def desired_panes(cfg):
-    """The queen first, then each agent type in config order, indices 1..count."""
+    """The queen first (unless disabled), then each agent type in config order, indices 1..count."""
     prefix = cfg["prefix"]
     queen = cfg["queen"]
     name = queen_name(prefix)
-    panes = [Pane(name, name, "queen", 1, queen["dir"], queen["command"],
-                  queen.get("env", {}), queen.get("config_dir"),
-                  tuple(queen.get("args", ())))]
+    panes = []
+    if queen.get("enabled", True):
+        panes.append(Pane(name, name, "queen", 1, queen["dir"], queen["command"],
+                          queen.get("env", {}), queen.get("config_dir"),
+                          tuple(queen.get("args", ()))))
     for agent in cfg["agents"]:
         window = f"{agent['type']}-{prefix}"
         for i in range(1, agent["count"] + 1):
@@ -56,7 +58,9 @@ def desired_panes(cfg):
 
 
 def plan(desired, running, queen_name):
-    """Return (to_start, to_stop); the queen is never stopped."""
+    """Return (to_start, to_stop); the queen named queen_name is never stopped.
+
+    queen_name is None when the queen is disabled: a running queen pane is then surplus."""
     names = {p.name for p in desired}
     to_start = [p for p in desired if p.name not in running]
     to_stop = sorted((r for r in running.values()

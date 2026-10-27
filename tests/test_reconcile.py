@@ -61,6 +61,18 @@ def test_plan_queen_not_stopped_even_if_not_desired():
     assert to_start == [] and to_stop == []
 
 
+
+def test_queen_disabled():
+    cfg = make_cfg([("a", "/a", 1)])
+    cfg["queen"]["enabled"] = False
+    desired = desired_panes(cfg)
+    assert [p.name for p in desired] == ["a-swarm-1"]
+    queen = RunningPane("%0", "@0", "hive-queen-swarm", "hive-queen-swarm", "queen", 1, False)
+    to_start, to_stop = plan(desired, {"hive-queen-swarm": queen, "a-swarm-1": running("a", 1)},
+                             None)
+    assert to_start == [] and to_stop == [queen]
+
+
 # resolve_target
 
 QUEEN_MSG = "the queen is always running; use 'hive down' to stop the whole hive"

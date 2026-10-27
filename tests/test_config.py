@@ -1,4 +1,7 @@
+import ast
+import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -45,7 +48,7 @@ def test_1_5_config_loads_with_queen_defaults(write, tmp_path):
     assert cfg["queen"] == {"type": "queen", "dir": str(tmp_path / "hive" / "queen"),
                             "command": "claude -n {name} --remote-control {name}" + QUEEN_FLAGS,
                             "args": [], "env": {},
-                            "config_dir": None}
+                            "config_dir": None, "enabled": True}
     assert cfg["queen"]["command"] == cfg["agents"][0]["command"] + QUEEN_FLAGS
     assert cfg["search_roots"] == []
     assert cfg["discover"] is None
@@ -415,3 +418,136 @@ def test_launchers_default_unknown(write, monkeypatch, capsys):
     code, _, err = run_hive(monkeypatch, capsys, "launchers", "default", "nope")
     assert code == 2 and "available: a, b" in err
     assert path.read_text() == before
+
+
+# --- named profiles (R0) -------------------------------------------------------
+
+def write_profile(tmp_path, name, text):
+    path = tmp_path / "hive" / "profiles" / name / "config.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+@pytest.fixture
+def profile(tmp_path, monkeypatch):
+    """XDG_CONFIG_HOME = tmp_path; select a profile with the option (like --profile)."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setattr(cli, "_profile_option", None)
+
+    def select(name):
+        monkeypatch.setattr(cli, "_profile_option", name)
+    return select
+
+
+def test_profile_paths(profile, tmp_path, monkeypatch):
+    profile("t")
+    write_profile(tmp_path, "t", BASE)
+    cfg = cli.load_config()
+    pdir = tmp_path / "hive" / "profiles" / "t"
+    assert cfg["config_path"] == str(pdir / "config.toml")
+    assert cfg["queen"]["dir"] == str(pdir / "queen")
+    monkeypatch.setattr(cli, "_lock", None)
+    cli.hold_lock()
+    cli._lock.close()
+    assert (pdir / ".lock").exists() and not (tmp_path / "hive" / ".lock").exists()
+
+
+def test_profile_env_vs_option(profile, monkeypatch):
+    monkeypatch.setenv("HIVE_PROFILE", "a")
+    assert cli.profile_name() == "a"
+    profile("b")
+    assert cli.profile_name() == "b"
+    profile("default")
+    assert cli.profile_name() is None and cli.unit_name() == "hive.service"
+
+
+def test_profile_defaults(profile, tmp_path):
+    profile("t")
+    write_profile(tmp_path, "t", '[defaults]\ncommand = "c {name} --remote-control"\n')
+    cfg = cli.load_config()
+    assert (cfg["prefix"], cfg["session"], cfg["socket"]) == ("t", "t-agents", "hive-t")
+    assert cfg["profile"] == "t" and cli.unit_name() == "hive-t.service"
+
+
+@pytest.mark.parametrize("default_text", [None, 'tmux_socket = "prod"\n', "not toml [",
+                                          'tmux_socket = "prod"\nprefix = "unterminated\n',
+                                          '"tmux_socket" = "./prod"\nprefix = "unterminated\n'])
+def test_profile_socket_collision(profile, tmp_path, capsys, default_text):
+    if default_text is not None:
+        (tmp_path / "hive").mkdir()
+        (tmp_path / "hive" / "config.toml").write_text(default_text)
+    profile("t")
+    write_profile(tmp_path, "t", 'tmux_socket = "hive"\n' + BASE)
+    fails(capsys, "is the default profile's socket")
+    for alias in ("./hive", "/hive", "a/../hive"):
+        write_profile(tmp_path, "t", f'tmux_socket = "{alias}"\n' + BASE)
+        fails(capsys, "is the default profile's socket")
+    if default_text and "prod" in default_text:
+        write_profile(tmp_path, "t", 'tmux_socket = "prod"\n' + BASE)
+        fails(capsys, "tmux_socket 'prod' is the default profile's socket")
+
+
+def test_default_socket_alias_is_refused(profile, tmp_path, capsys):
+    (tmp_path / "hive").mkdir()
+    (tmp_path / "hive" / "config.toml").write_text(f'tmux_socket = "../tmux-{os.getuid()}/x"\n')
+    profile("t")
+    write_profile(tmp_path, "t", 'tmux_socket = "x"\n' + BASE)
+    fails(capsys, "tmux_socket 'x' is the default profile's socket")
+
+
+def test_unparsable_default_socket_line_is_refused(profile, tmp_path, capsys):
+    (tmp_path / "hive").mkdir()
+    (tmp_path / "hive" / "config.toml").write_text('tmux_socket = "prod\n')
+    profile("t")
+    write_profile(tmp_path, "t", BASE)
+    fails(capsys, "cannot parse the tmux_socket line")
+
+
+def test_invalid_profile_name(profile, capsys, monkeypatch):
+    for bad in ("Bad.name", "-x", ""):
+        monkeypatch.setattr(sys, "argv", ["hive", f"--profile={bad}", "list"])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 2
+        assert "profile name" in capsys.readouterr().err
+
+
+def test_pane_exports_profile(profile, tmp_path):
+    profile("t")
+    write_profile(tmp_path, "t", BASE + '\n[env]\nHIVE_PROFILE = "other"\n')
+    line = cli.shell_line(cli.load_config(), "/d", "run")
+    # last export wins, so a pane always addresses its own profile
+    assert line.endswith("export HIVE_PROFILE=t && cd /d && run")
+    profile(None)
+    (tmp_path / "hive" / "config.toml").write_text(BASE)
+    assert "HIVE_PROFILE" not in cli.shell_line(cli.load_config(), "/d", "run")
+
+
+def test_tmux_server_env_drops_hive_profile(monkeypatch):
+    monkeypatch.setenv("HIVE_PROFILE", "t")
+    assert "HIVE_PROFILE" not in cli.tmux_env()
+
+
+def test_queen_enabled_must_be_bool(write, capsys):
+    write(BASE + '\n[queen]\nenabled = "no"\n')
+    fails(capsys, "'queen.enabled' must be true or false")
+
+
+def test_fixtures_name_a_socket():
+    """Config texts that tests run against real tmux name their own socket, and conftest
+    points TMUX_TMPDIR at a private dir, so no test can reach the live hive server."""
+    here = Path(__file__).parent
+    # The base configs of the modules that start tmux (test_cli: a fake tmux on PATH).
+    wanted = {("test_tmux.py", "CONFIG"), ("test_args.py", "CONFIG"), ("test_cli.py", "BASE")}
+    texts = {}
+    for path in here.glob("test_*.py"):
+        for node in ast.parse(path.read_text()).body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                key = (path.name, getattr(node.targets[0], "id", None))
+                if key in wanted or key[1] == "CONFIG":
+                    texts[key] = ast.unparse(node.value)
+    assert wanted <= texts.keys()
+    for name, text in texts.items():
+        assert "tmux_socket" in text, name
+    assert os.environ["TMUX_TMPDIR"].startswith("/tmp/hive-t-")

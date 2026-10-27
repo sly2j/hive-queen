@@ -1,4 +1,7 @@
 # hive config: ${XDG_CONFIG_HOME:-~/.config}/hive/config.toml
+# A named profile (`hive --profile NAME`, or HIVE_PROFILE=NAME) reads .../hive/profiles/NAME/config.toml
+# and has its own lock, queen dir and systemd unit hive-NAME.service; its defaults are prefix = NAME,
+# session = "NAME-agents", tmux_socket = "hive-NAME", and it refuses the default profile's socket.
 # Unknown keys are errors.
 
 # prefix = "myhost"              # machine part of instance and window names; default: short hostname
@@ -19,7 +22,8 @@ command = "claude -n {name} --remote-control {name} --permission-mode auto"
 #   Placed at {args} in the command, else appended at the end. A per-type or [queen] args replaces this list, no merge.
 #   A launcher that takes flags before "--" needs {args}: command = "claude-supervisor run api {args} -- -n {name} --remote-control {name}"
 
-# [queen]                        # optional; the queen always starts, in <config dir>/queen
+# [queen]                        # optional; the queen starts in <config dir>/queen unless disabled
+# enabled = true                 # default true; false: no queen pane (a running one is stopped), e.g. for a test hive
 # The queen's command always gets `--tools Bash,Monitor,Read,Grep,Glob,Edit,Write,NotebookEdit,AskUserQuestion --strict-mcp-config`
 # appended (unless its command or args already have --tools / --strict-mcp-config), so it has no WebFetch, Agent or MCP tools.
 # command = "claude -n {name} --remote-control {name} --permission-mode auto"   # default: [defaults] command

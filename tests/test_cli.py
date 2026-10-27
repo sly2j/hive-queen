@@ -28,6 +28,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setattr(cli, "_lock", None)
     monkeypatch.setattr(cli, "_warned", set())
+    monkeypatch.setattr(cli, "_profile_option", None)  # restored after run() sets it
     cfg = xdg / "hive" / "config.toml"
     cfg.parent.mkdir(parents=True)
     cfg.write_text(BASE)
@@ -515,3 +516,98 @@ def test_queen_tools_match_guard():
     guard = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(guard)
     assert set(cli.QUEEN_TOOLS.split(",")) == guard.QUEEN_TOOLS
+
+
+
+# --- R0: named profiles and a disabled queen ---------------------------------------
+
+def profile_cfg(env, name, text):
+    path = env.xdg / "hive" / "profiles" / name / "config.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def test_lenient_down_refuses_collision(env, monkeypatch, capsys):
+    fake = FakeTmux()
+    monkeypatch.setattr(cli, "tmux", fake)
+    profile_cfg(env, "t", 'tmux_socket = "hive"\nbogus = [\n')
+    code, _, err = hive(monkeypatch, capsys, "--profile", "t", "down")
+    assert code == 2 and "is the default profile's socket" in err
+    # the default profile's own socket is refused too
+    profile_cfg(env, "t", f'tmux_socket = "{SOCKET}"\nbogus = [\n')
+    code, _, err = hive(monkeypatch, capsys, "--profile", "t", "status")
+    assert code == 2 and "is the default profile's socket" in err
+    assert fake.calls == []
+
+
+def test_profile_unit_name(env, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "platform", "linux")
+    log = fake_bin(env.tmp, monkeypatch, "systemctl")
+    profile_cfg(env, "t", BASE.replace(SOCKET, SOCKET + "-t"))
+    code, out, _ = hive(monkeypatch, capsys, "--profile", "t", "install-service")
+    units = env.home / ".config" / "systemd" / "user"
+    assert code == 0 and [p.name for p in units.iterdir()] == ["hive-t.service"]
+    text = (units / "hive-t.service").read_text()
+    assert "ExecStart=%h/.local/bin/hive --profile t up\n" in text
+    assert "ExecStop=%h/.local/bin/hive --profile t down\n" in text
+    assert "enable --now hive-t.service" in out
+    assert hive(monkeypatch, capsys, "--profile", "t", "uninstall-service")[0] == 0
+    assert "disable --now hive-t.service" in log.read_text()
+    assert "hive.service" not in log.read_text()
+
+
+def test_restart_named_profile_never_checks_hive_service(env, monkeypatch, capsys):
+    log = fake_bin(env.tmp, monkeypatch, "systemctl", "exit 1")  # unit not active
+    monkeypatch.setattr(cli, "tmux", FakeTmux())
+    profile_cfg(env, "t", BASE.replace(SOCKET, SOCKET + "-t") + '\n[queen]\nenabled = false\n')
+    code, out, _ = hive(monkeypatch, capsys, "--profile", "t", "restart")
+    assert code == 0 and "nothing to start" in out
+    assert log.read_text() == "--user is-active --quiet hive-t.service\n"
+
+
+def test_install_service_named_profile_on_macos(env, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    profile_cfg(env, "t", BASE.replace(SOCKET, SOCKET + "-t"))
+    code, _, err = hive(monkeypatch, capsys, "--profile", "t", "install-service")
+    assert code == 1 and "install-service is Linux-only (systemd)" in err
+    assert not (env.home / ".config" / "systemd").exists()
+
+
+DISABLED = BASE + '\n[queen]\nenabled = false\n'
+
+
+def test_up_empty_hive(env, monkeypatch, capsys):
+    fake = FakeTmux()
+    monkeypatch.setattr(cli, "tmux", fake)
+    monkeypatch.setattr(cli, "session_running", lambda cfg: False)
+    env.cfg.write_text(DISABLED)
+    code, out, _ = hive(monkeypatch, capsys, "up")
+    assert code == 0 and out == "nothing to start: queen disabled and no agents\n"
+    assert fake.calls == []
+    assert not (env.xdg / "hive" / "queen").exists()
+
+
+def test_up_first_pane_is_worker(env, monkeypatch, capsys):
+    fake = FakeTmux()
+    monkeypatch.setattr(cli, "tmux", fake)
+    monkeypatch.setattr(cli, "reconcile", lambda cfg, **kw: 0)
+    (env.tmp / "w").mkdir()
+    env.cfg.write_text(DISABLED + f'\n[[agents]]\ntype = "w"\ndir = "{env.tmp / "w"}"\n')
+    code, out, _ = hive(monkeypatch, capsys, "up")
+    new = next(c for c in fake.calls if c[0] == "new-session")
+    assert code == 0 and new[new.index("-n") + 1] == "w-t" and new[new.index("-c") + 1] == str(env.tmp / "w")
+    assert "started w-t-1" in out and not (env.xdg / "hive" / "queen").exists()
+
+
+def test_list_queen_disabled(env, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "session_running", lambda cfg: True)
+    monkeypatch.setattr(cli, "tmux", FakeTmux())
+    queen = cli.RunningPane("%0", "@0", "hive-queen-t", "hive-queen-t", "queen", 1, False)
+    monkeypatch.setattr(cli, "running_panes", lambda cfg: ({"hive-queen-t": queen}, []))
+    env.cfg.write_text(DISABLED)
+    code, out, _ = hive(monkeypatch, capsys, "list")
+    lines = out.splitlines()
+    assert code == 0 and lines[1].startswith("queen name=hive-queen-t running=yes")
+    assert lines[1].endswith(" enabled=no")
+    assert "drift start=none stop=hive-queen-t" in lines
