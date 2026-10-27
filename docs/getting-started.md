@@ -18,9 +18,9 @@ brew install tmux uv
 ```
 
 ```sh
-uv tool install git+https://github.com/sly2j/claude-rc-hive
+uv tool install git+https://github.com/sly2j/hive-queen
 # or, from a checkout:   uv tool install .
-# or with pipx:          pipx install git+https://github.com/sly2j/claude-rc-hive
+# or with pipx:          pipx install git+https://github.com/sly2j/hive-queen
 ```
 
 On distributions that follow PEP 668 (for example Debian 13) and on Homebrew Python, `pip install --user` is blocked; use uv or pipx.
@@ -95,7 +95,7 @@ To start the hive at login, run `hive install-service --enable` on Linux (see [s
 ```sh
 hive down
 hive uninstall-service           # if you installed it
-uv tool uninstall hive           # or: pipx uninstall hive
+uv tool uninstall hive-queen     # or: pipx uninstall hive-queen (a 1.x install: hive)
 rm -r ~/.config/hive             # config.toml, .lock, queen/, state/ and profiles/ (or under $XDG_CONFIG_HOME)
 ```
 

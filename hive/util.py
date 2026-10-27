@@ -24,9 +24,12 @@ def quote(text):
     return json.dumps(text, ensure_ascii=False)
 
 
+DIST_NAME = "hive-queen"
+
+
 def get_version():
     try:
-        return pkg_version("hive")
+        return pkg_version(DIST_NAME)
     except PackageNotFoundError:
         return (Path(__file__).resolve().parent.parent / "VERSION").read_text().strip()
 

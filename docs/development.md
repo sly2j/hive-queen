@@ -1,8 +1,8 @@
 # Development
 
 ```sh
-git clone https://github.com/sly2j/claude-rc-hive
-cd claude-rc-hive
+git clone https://github.com/sly2j/hive-queen
+cd hive-queen
 uv sync
 uv run --frozen pytest -q
 uv run hive --version
@@ -15,7 +15,7 @@ Try changes against a live hive in a [test profile](test-profile.md) (`uv run hi
 To update an installed copy after pulling or changing the repo:
 
 ```sh
-uv tool upgrade hive         # or: uv tool install --reinstall .
+uv tool upgrade hive-queen   # or: uv tool install --reinstall .
 ```
 
 ## Layout
@@ -31,3 +31,14 @@ git config core.hooksPath .githooks
 ```
 
 The hook computes the new version from `HEAD:VERSION`, so re-running after an aborted commit does not bump twice. Feature branches: rebase on `main`, then squash-merge as one commit, so `main` stays linear and gets exactly one increment. `git commit --amend` on `main` bumps again; amend with `--no-verify`.
+
+A release sets `VERSION` to the new `MAJOR.0` on its branch (the hook leaves other branches alone), lands it on `main` with `--no-verify` so the hook does not bump it, and tags the release commit `vMAJOR.MINOR`. For 2.0:
+
+```sh
+git merge --squash release/2.0
+git commit --no-verify -m "release: hive queen 2.0"
+git tag -a v2.0 -m "hive queen 2.0"
+git push origin main --follow-tags
+```
+
+The next ordinary commit on `main` is bumped to `2.1` by the hook.

@@ -2,7 +2,7 @@
 
 hive queen runs coding-agent sessions in tmux: N instances of each agent type, on a dedicated tmux server, with one extra coordinator session called the queen. You describe the agents in one config file; `hive up` starts them, and each one is then reachable from another device: a Claude Code session by name through Remote Control (the Claude app or claude.ai), a Codex CLI session through the machine's paired Codex daemon (the Codex app). Use it to keep a fixed set of remote-controllable agent sessions running on a machine, start them at login (systemd on Linux, a LaunchAgent on macOS), and add or remove instances by asking the queen.
 
-The project is hive queen; the repository is `sly2j/claude-rc-hive` and the Python package is `hive`. The command, the config directory and the systemd unit are all named `hive`.
+The project is hive queen; the repository is `sly2j/hive-queen` and the Python distribution is `hive-queen` (import package `hive`). The command, the config directory and the systemd unit are all named `hive`.
 
 Terms used throughout are defined in [Concepts](docs/concepts.md).
 
@@ -33,7 +33,7 @@ Terms used throughout are defined in [Concepts](docs/concepts.md).
 You need Linux or macOS with git, tmux >= 3.0, uv (or pipx), and the Claude Code CLI (`claude`) logged in, with Remote Control; the queen's guard hook needs Claude Code >= 2.1.295. [Getting started](docs/getting-started.md) has the details, including the macOS setup and what comes after the first hive.
 
 ```sh
-uv tool install git+https://github.com/sly2j/claude-rc-hive
+uv tool install git+https://github.com/sly2j/hive-queen
 ```
 
 ```sh
@@ -84,6 +84,7 @@ Operating a hive:
 - [Test profile](docs/test-profile.md): a second, isolated hive on the same machine.
 - [Run at login](docs/service.md): the systemd user unit on Linux, a LaunchAgent on macOS.
 - [Development](docs/development.md): clone, test, module layout, update an install, versioning.
+- [Upgrade to 2.0](docs/upgrade.md): moving a 1.x install to 2.0, and what changes for existing configs.
 
 ## License
 

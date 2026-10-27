@@ -1,20 +1,13 @@
 """Relative links and anchors in README.md and docs/**/*.md resolve.
 
-Each feature package creates its own docs page when it lands; until then a link to that page is
-allowed to dangle (PENDING_PAGES). Everything else must resolve: the target file exists under the
-repo, and a `#fragment` names a heading in it (GitHub's slug rules).
+Every link must resolve: the target file exists under the repo, and a `#fragment` names a heading
+in it (GitHub's slug rules).
 """
 
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-
-# Pages owned by feature packages that may not have landed yet (docs ownership, plan D11).
-PENDING_PAGES = {
-    "docs/upgrade.md",
-}
-PENDING_DIRS = ()
 
 FENCE = re.compile(r"^ {0,3}(```|~~~).*?^ {0,3}\1[^\n]*$", re.M | re.S)
 INLINE_CODE = re.compile(r"`[^`\n]*`")
@@ -47,10 +40,6 @@ def markdown_files(root):
     return [root / "README.md", *sorted((root / "docs").rglob("*.md"))]
 
 
-def is_pending(rel):
-    return rel in PENDING_PAGES or any(rel.startswith(d) for d in PENDING_DIRS)
-
-
 def broken_links(root):
     """`file:line: target (reason)` for every relative link that does not resolve."""
     problems = []
@@ -65,8 +54,6 @@ def broken_links(root):
                 rel = dest.relative_to(root).as_posix() if root in dest.parents else str(dest)
                 where = f"{md.relative_to(root)}:{lineno}: {target}"
                 if not dest.is_file():
-                    if path and is_pending(rel):
-                        continue
                     problems.append(f"{where} (no such file)")
                 elif fragment and dest.suffix == ".md" and fragment not in slugs(dest.read_text()):
                     problems.append(f"{where} (no heading #{fragment} in {rel})")
@@ -81,7 +68,7 @@ def test_checker_detects_broken_links(tmp_path):
     (tmp_path / "docs").mkdir()
     (tmp_path / "README.md").write_text(
         "# T\n\n```sh\n[fenced](#y)\n```\n\n## Two words\n\n[ok](#two-words) [ok](docs/a.md#part-b) "
-        "[bad](docs/missing.md) [bad](docs/a.md#nope) [pending](docs/upgrade.md) "
+        "[bad](docs/missing.md) [bad](docs/a.md#nope) "
         "[ext](https://example.org) `[code](#x)`\n"
     )
     (tmp_path / "docs" / "a.md").write_text("# A\n\n## Part B\n\n[up](../README.md#two-words)\n")

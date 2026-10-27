@@ -12,7 +12,7 @@ wheels = [
 ]
 
 [[package]]
-name = "hive"
+name = "hive-queen"
 source = { editable = "." }
 
 [package.dev-dependencies]

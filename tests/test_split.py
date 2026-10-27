@@ -8,12 +8,13 @@ import pkgutil
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 
 import hive
-from hive import cli
+from hive import cli, util
 from hive.config import load_config
 from hive.drivers import get_driver
 from hive.drivers.claude import DEFAULT_QUEEN_COMMAND, QUEEN_TOOLS
@@ -168,18 +169,33 @@ def test_wheel_has_drivers(tmp_path):
                    capture_output=True)
     python = venv / "bin" / "python"
     wheel = next(dist.glob("*.whl"))
+    expected = (ROOT / "VERSION").read_text().strip()
+    assert wheel.name.startswith(f"hive_queen-{expected}-")
     subprocess.run(["uv", "pip", "install", "--python", str(python), str(wheel)], check=True,
                    capture_output=True)
     # Run outside the checkout so the source tree cannot shadow the installed package.
     out = subprocess.run([str(python), "-c", "import hive.drivers.claude, hive.cli, hive.queen; "
                           "from importlib import resources; "
-                          "assert resources.files('hive').joinpath('queen', 'claude', 'hooks', 'guard.py')"
-                          ".is_file(); print(hive.cli.__file__)"], cwd=tmp_path, capture_output=True,
+                          "q = resources.files('hive').joinpath('queen'); "
+                          "assert q.joinpath('claude', 'hooks', 'guard.py').is_file(); "
+                          "assert q.joinpath('codex', 'hooks', 'guard.py').is_file(); "
+                          "print(hive.cli.__file__)"], cwd=tmp_path, capture_output=True,
                          text=True, check=True).stdout
     assert str(venv) in out
     version = subprocess.run([str(venv / "bin" / "hive"), "--version"], cwd=tmp_path,
                              capture_output=True, text=True, check=True).stdout
-    assert version.startswith("hive ")
+    assert version == f"hive {expected}\n"
+
+
+def test_package_name(monkeypatch):
+    """Dist hive-queen, command hive, and get_version looks the version up under the dist name."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    assert project["name"] == "hive-queen"
+    assert project["scripts"] == {"hive": "hive.cli:main"}
+    asked = []
+    monkeypatch.setattr(util, "pkg_version", lambda name: asked.append(name) or "9.9")
+    assert util.get_version() == "9.9"
+    assert asked == ["hive-queen"]
 
 
 if __name__ == "__main__":
