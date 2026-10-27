@@ -10,14 +10,13 @@ import shlex
 import shutil
 from pathlib import Path
 
+from hive.drivers.claude import INSPECT_RE as MATCH_RE
 from hive.paths import PathError, expanduser, secret_check_parts
 
 DEFAULT_ROOTS = ["~/.local/bin", "/usr/local/bin", "/usr/bin", "/bin", "/opt"]
 HEAD_BYTES = 4096
 MAX_BYTES = 1 << 20
 MAX_LINES = 200
-MATCH_RE = re.compile(r"CLAUDE_CONFIG_DIR|claude|exec |env |export |HOME=|XDG_CONFIG_HOME",
-                      re.IGNORECASE)
 SECRET_RE = re.compile(r"(?i)(api[_-]?key|token|secret|password)\s*=")
 PRIVATE_PARTS = {"secrets", "private"}
 

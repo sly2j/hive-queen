@@ -1,0 +1,210 @@
+=== hive  --help
+usage: hive [-h] [--version] [--profile NAME]
+            {up,down,restart,status,attach,list,spawn,stop,reconcile,launchers,discover,dirs,roots,inspect-launcher,init,install-service,uninstall-service} ...
+
+Run N instances of each agent kind in tmux panes.
+
+positional arguments:
+  {up,down,restart,status,attach,list,spawn,stop,reconcile,launchers,discover,dirs,roots,inspect-launcher,init,install-service,uninstall-service}
+    up                  start the session, or reconcile it with the config if running
+    down                stop the session (and the hive tmux server if empty)
+    restart             restart via systemd if the unit is active, else down + up
+    status              show windows and panes (exit 1 if not running)
+    attach              attach to the session
+    list                show config and running state, unmanaged panes, drift
+    spawn               add workers (edits config, then reconciles)
+    stop                remove workers (lowers count, then reconciles)
+    reconcile           make the running session match the config
+    launchers           list the launcher registry and discover records
+    discover            run [queen] discover and print its output
+    dirs                read-only: list directories under search_roots
+    roots               show search_roots, or add/remove one (edits config)
+    inspect-launcher    read-only: show a launcher's CLAUDE_CONFIG_DIR evidence (files under
+                        inspect_roots only)
+    init                write an example config if none exists
+    install-service     write the systemd user unit
+    uninstall-service   disable and remove the systemd user unit
+
+options:
+  -h, --help            show this help message and exit
+  --version             show program's version number and exit
+  --profile NAME        use the named profile <config dir>/hive/profiles/NAME (own config, lock,
+                        queen dir, tmux socket hive-NAME, unit hive-NAME.service); default:
+                        $HIVE_PROFILE, else the default profile
+
+exit codes:
+  0  ok
+  1  runtime error, or the session is not running
+  2  usage or config error
+  3  untrusted or refused (spawn without --trust, dirs/roots refusals)
+=== hive up --help
+usage: hive up [-h]
+
+Start the session with the queen and every configured agent, or reconcile it with the config if it
+is already running. Agents whose dir is missing are skipped with a warning.
+
+options:
+  -h, --help  show this help message and exit
+=== hive down --help
+usage: hive down [-h]
+
+Stop the session, and the hive tmux server once it is empty. Works with a broken config.toml:
+prefix, session and tmux_socket are read from its parsable top-level lines, and only names the
+config does not set fall back to the defaults. A name that is set but invalid or unparsable exits
+2 instead of guessing.
+
+options:
+  -h, --help  show this help message and exit
+=== hive restart --help
+usage: hive restart [-h]
+
+Restart via systemd if the hive.service unit is active, else run down and then up.
+
+options:
+  -h, --help  show this help message and exit
+=== hive status --help
+usage: hive status [-h]
+
+Show windows and panes; exit 1 if the session is not running. Works with a broken config.toml:
+prefix, session and tmux_socket are read from its parsable top-level lines, and only names the
+config does not set fall back to the defaults. A name that is set but invalid or unparsable exits
+2 instead of guessing.
+
+options:
+  -h, --help  show this help message and exit
+=== hive attach --help
+usage: hive attach [-h]
+
+options:
+  -h, --help  show this help message and exit
+=== hive list --help
+usage: hive list [-h]
+
+options:
+  -h, --help  show this help message and exit
+=== hive spawn --help
+usage: hive spawn [-h] [-n N] [--type TYPE] [--command CMD] [--arg ARG] [--config-dir PATH]
+                  [--launcher NAME] [--env KEY=VALUE] [--trust]
+                  TARGET
+
+Add workers: raise the count of an existing agent type, or add a new type for a directory. Exit 3
+if the directory is untrusted (rerun with --trust after the user confirms).
+
+positional arguments:
+  TARGET                agent type, or a directory (absolute, ~/..., or a name under search_roots)
+
+options:
+  -h, --help            show this help message and exit
+  -n N                  number of workers to add (default 1)
+  --type TYPE           agent type name for a new entry (default: directory name, plus -<launcher>
+                        when a launcher is chosen; letters, digits, '.', '_' and '-' only)
+  --command CMD         command template; must contain {name} and --remote-control
+  --arg ARG             flag added to the command of a new type (repeatable); use --arg=--fable
+                        for values starting with '-'
+  --config-dir PATH     Claude config dir the command uses; only locates the trust file
+  --launcher, --sandbox NAME
+                        take command and config_dir from launcher NAME (registry, then [queen]
+                        discover); --sandbox is an alias
+  --env KEY=VALUE       env for a new type, exported after [env] (repeatable)
+  --trust               record Claude Code workspace trust for the directory (only after the user
+                        agreed)
+=== hive stop --help
+usage: hive stop [-h] [-n N] TARGET
+
+positional arguments:
+  TARGET      agent type
+
+options:
+  -h, --help  show this help message and exit
+  -n N        number of workers to remove (default 1)
+=== hive reconcile --help
+usage: hive reconcile [-h] [--dry-run]
+
+Start missing panes, stop surplus ones and adopt panes titled with a desired name, so the running
+session matches the config.
+
+options:
+  -h, --help  show this help message and exit
+  --dry-run   only print what would change
+=== hive launchers --help
+usage: hive launchers [-h] {list,add,default} ...
+
+positional arguments:
+  {list,add,default}
+    list              list launchers (default action)
+    add               register a launcher in config.toml (never runs it)
+    default           set the default launcher (edits config)
+
+options:
+  -h, --help          show this help message and exit
+=== hive launchers list --help
+usage: hive launchers list [-h]
+
+options:
+  -h, --help  show this help message and exit
+=== hive launchers add --help
+usage: hive launchers add [-h] [--config-dir PATH] [--description TEXT] NAME COMMAND
+
+positional arguments:
+  NAME
+  COMMAND             the full launch command, as one argument
+
+options:
+  -h, --help          show this help message and exit
+  --config-dir PATH   CLAUDE_CONFIG_DIR the launcher uses
+  --description TEXT
+=== hive launchers default --help
+usage: hive launchers default [-h] NAME
+
+positional arguments:
+  NAME
+
+options:
+  -h, --help  show this help message and exit
+=== hive discover --help
+usage: hive discover [-h]
+
+options:
+  -h, --help  show this help message and exit
+=== hive dirs --help
+usage: hive dirs [-h] [--depth N] [ROOT]
+
+positional arguments:
+  ROOT        a search root, a directory inside one, or a name as for spawn
+
+options:
+  -h, --help  show this help message and exit
+  --depth N   levels to list (default 1, max 3)
+=== hive roots --help
+usage: hive roots [-h] [{add,remove}] [PATH]
+
+positional arguments:
+  {add,remove}  add or remove a search root; omit to list them
+  PATH          the directory to add or remove (required with an action)
+
+options:
+  -h, --help    show this help message and exit
+=== hive inspect-launcher --help
+usage: hive inspect-launcher [-h] COMMAND
+
+positional arguments:
+  COMMAND     the full launch command, as one argument
+
+options:
+  -h, --help  show this help message and exit
+=== hive init --help
+usage: hive init [-h]
+
+options:
+  -h, --help  show this help message and exit
+=== hive install-service --help
+usage: hive install-service [-h] [--enable]
+
+options:
+  -h, --help  show this help message and exit
+  --enable    also enable and start it now
+=== hive uninstall-service --help
+usage: hive uninstall-service [-h]
+
+options:
+  -h, --help  show this help message and exit

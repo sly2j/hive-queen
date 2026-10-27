@@ -1,18 +1,26 @@
 """CLI robustness: config errors, lenient down/status, locking, service unit, warnings.
 
 Runs main() with HOME and XDG_CONFIG_HOME under tmp_path. tmux is never the real one:
-tests either stub cli.tmux or put a fake `tmux` first on PATH.
+tests either stub hive.tmux.tmux or put a fake `tmux` first on PATH.
 """
 
 import json
 import os
 import stat
 import sys
+from importlib import resources
 from types import SimpleNamespace
 
 import pytest
 
-from hive import cli
+from hive import cli, lock
+from hive.config import edit_config, load_config, parse_config
+from hive.drivers.claude import QUEEN_TOOLS
+from hive.launch import preflight, queen_command_line, warn_untrusted
+from hive.lifecycle import cmd_up, reconcile
+from hive.queen import materialize_queen
+from hive.reconcile import RunningPane
+from hive.service import service_exe, unit_quote
 
 SOCKET = f"hive-test-cli-{os.getpid()}"
 BASE = f'prefix = "t"\ntmux_socket = "{SOCKET}"\n\n[defaults]\ncommand = "sleep 600 {{name}} --remote-control"\n'
@@ -26,9 +34,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-    monkeypatch.setattr(cli, "_lock", None)
-    monkeypatch.setattr(cli, "_warned", set())
-    monkeypatch.setattr(cli, "_profile_option", None)  # restored after run() sets it
+    monkeypatch.setattr("hive.lock._lock", None)
+    monkeypatch.setattr("hive.launch._warned", set())
+    monkeypatch.setattr("hive.config._profile_option", None)  # restored after run() sets it
     cfg = xdg / "hive" / "config.toml"
     cfg.parent.mkdir(parents=True)
     cfg.write_text(BASE)
@@ -170,7 +178,7 @@ def test_dotted_socket_name_is_valid(env, monkeypatch, capsys):
     env.cfg.write_text(BASE.replace(f'tmux_socket = "{SOCKET}"', 'tmux_socket = "x.y"'))
     code, _, err = hive(monkeypatch, capsys, "list")
     assert "tmux_socket" not in err
-    assert cli.parse_config()["socket"] == "x.y"
+    assert parse_config()["socket"] == "x.y"
 
 
 @pytest.mark.parametrize("bad", ['prefix = "a.b"', 'session = "x:y"', "prefix = 3",
@@ -210,7 +218,7 @@ def test_lock_dir_not_creatable(env, monkeypatch, capsys):
     blocker.write_text("")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(blocker))
     with pytest.raises(SystemExit) as exc:
-        cli.hold_lock()
+        lock.hold_lock()
     assert exc.value.code == 1
     assert "cannot open lock" in capsys.readouterr().err
 
@@ -219,8 +227,8 @@ def test_down_continues_without_lock(env, monkeypatch, capsys):
     blocker = env.tmp / "file"
     blocker.write_text("")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(blocker))
-    cli.hold_lock(required=False)  # warns, does not exit
-    assert cli._lock is None
+    lock.hold_lock(required=False)  # warns, does not exit
+    assert lock._lock is None
     assert "continuing without it" in capsys.readouterr().err
 
 
@@ -229,13 +237,13 @@ def test_down_continues_without_lock(env, monkeypatch, capsys):
 def test_ctrl_c_and_broken_pipe(monkeypatch, capsys):
     def interrupt():
         raise KeyboardInterrupt
-    monkeypatch.setattr(cli, "run", interrupt)
+    monkeypatch.setattr("hive.cli.run", interrupt)
     assert cli.main() == 130
     assert capsys.readouterr().err == "hive: interrupted\n"
 
     def pipe():
         raise BrokenPipeError
-    monkeypatch.setattr(cli, "run", pipe)
+    monkeypatch.setattr("hive.cli.run", pipe)
     monkeypatch.setattr(os, "dup2", lambda *a: None)
     assert cli.main() == 1
     assert capsys.readouterr().err == ""
@@ -260,14 +268,14 @@ def test_spawn_in_a_read_only_config_dir_seeds_no_trust(env, monkeypatch, capsys
 def test_edit_config_reports_read_and_write_errors(env, monkeypatch, capsys):
     cfg = {"config_path": str(env.tmp / "missing.toml")}
     with pytest.raises(SystemExit) as exc:
-        cli.edit_config(cfg, lambda t: t, lambda d: None)
+        edit_config(cfg, lambda t: t, lambda d: None)
     assert exc.value.code == 1 and "cannot read" in capsys.readouterr().err
 
     def deny(path, text):
         raise PermissionError(13, "Permission denied")
-    monkeypatch.setattr(cli, "write_atomic", deny)
+    monkeypatch.setattr("hive.config.write_atomic", deny)
     with pytest.raises(SystemExit) as exc:
-        cli.edit_config({"config_path": str(env.cfg)}, lambda t: t, lambda d: None)
+        edit_config({"config_path": str(env.cfg)}, lambda t: t, lambda d: None)
     assert exc.value.code == 1 and f"cannot write {env.cfg}" in capsys.readouterr().err
 
 
@@ -293,31 +301,31 @@ class FakeTmux:
 @pytest.mark.parametrize("exc", [SystemExit(1), KeyboardInterrupt(), RuntimeError("boom")])
 def test_up_removes_the_half_built_session_on_any_failure(env, monkeypatch, capsys, exc):
     fake = FakeTmux()
-    monkeypatch.setattr(cli, "tmux", fake)
+    monkeypatch.setattr("hive.tmux.tmux", fake)
 
     def failing(cfg, **kw):
         raise exc
-    monkeypatch.setattr(cli, "reconcile", failing)
-    cfg = cli.load_config()
+    monkeypatch.setattr("hive.lifecycle.reconcile", failing)
+    cfg = load_config()
     with pytest.raises(type(exc)):
-        cli.cmd_up(cfg, None)
+        cmd_up(cfg, None)
     assert ("kill-session", "-t", "=t-agents") in fake.calls
     assert "removed session t-agents" in capsys.readouterr().err
 
 
 def test_materialize_queen_dies_on_oserror(env, capsys):
-    cfg = cli.load_config()
+    cfg = load_config()
     qdir = env.xdg / "hive" / "queen"
     qdir.write_text("a file, not a dir")
     with pytest.raises(SystemExit) as exc:
-        cli.materialize_queen(cfg)
+        materialize_queen(cfg)
     assert exc.value.code == 1 and "cannot write the queen dir" in capsys.readouterr().err
 
 
 # --- R8 ----------------------------------------------------------------------
 
 def test_discover_times_out(env, monkeypatch, capsys):
-    monkeypatch.setattr(cli, "DISCOVER_TIMEOUT", 0.3)
+    monkeypatch.setattr("hive.launchers.DISCOVER_TIMEOUT", 0.3)
     env.cfg.write_text(BASE + '\n[queen]\ndiscover = "sleep 5"\n')
     code, _, err = hive(monkeypatch, capsys, "spawn", "x", "--sandbox", "n")
     assert code == 1 and "discover command timed out" in err
@@ -325,9 +333,9 @@ def test_discover_times_out(env, monkeypatch, capsys):
 
 def test_sandbox_discover_runs_before_the_lock(env, monkeypatch, capsys):
     order = []
-    monkeypatch.setattr(cli, "launcher_record", lambda cfg, name: order.append("discover"))
-    monkeypatch.setattr(cli, "hold_lock", lambda **_: order.append("lock"))
-    monkeypatch.setattr(cli, "cmd_spawn", lambda cfg, args: 0)
+    monkeypatch.setattr("hive.launchers.launcher_record", lambda cfg, name: order.append("discover"))
+    monkeypatch.setattr("hive.lock.hold_lock", lambda **_: order.append("lock"))
+    monkeypatch.setattr("hive.workers.cmd_spawn", lambda cfg, args: 0)
     env.cfg.write_text(BASE + '\n[queen]\ndiscover = "true"\n')
     assert hive(monkeypatch, capsys, "spawn", "x", "--sandbox", "n")[0] == 0
     assert order == ["discover", "lock"]
@@ -342,7 +350,7 @@ def test_status_survives_a_tab_in_the_pane_title(env, monkeypatch, capsys):
                 return SimpleNamespace(returncode=0, stderr="",
                                        stdout="0\twin\t0\tsleep\ta\ttitle\twith\ttabs\n")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
-    monkeypatch.setattr(cli, "tmux", Tmux())
+    monkeypatch.setattr("hive.tmux.tmux", Tmux())
     code, out, _ = hive(monkeypatch, capsys, "status")
     assert code == 0 and "pane 0: a\ttitle\twith\ttabs  (sleep)" in out
 
@@ -363,16 +371,16 @@ def test_service_commands_refuse_on_macos(env, monkeypatch, capsys):
 
 def test_materialized_guard_hook_uses_hives_interpreter(env):
     cfg = {"queen": {"dir": str(env.tmp / "queen")}}
-    cli.materialize_queen(cfg)
+    materialize_queen(cfg)
     path = env.tmp / "queen" / ".claude" / "settings.json"
     got = json.loads(path.read_text())
-    want = json.loads(cli.resources.files("hive").joinpath("queen", "settings.json").read_text())
+    want = json.loads(resources.files("hive").joinpath("queen", "settings.json").read_text())
     hook = got["hooks"]["PreToolUse"][0]["hooks"][0]
     assert hook["command"] == sys.executable
     hook["command"] = "python3"
     assert got == want
     before = path.stat().st_mtime_ns
-    cli.materialize_queen(cfg)  # unchanged bytes are not rewritten
+    materialize_queen(cfg)  # unchanged bytes are not rewritten
     assert path.stat().st_mtime_ns == before
 
 
@@ -417,25 +425,26 @@ def test_install_service_default_xdg_adds_no_environment_and_enable_skips_hint(
 
 
 def test_unit_exe_is_escaped_for_systemd(monkeypatch):
-    monkeypatch.setattr(cli.shutil, "which", lambda name: "/opt/my tools/100%/hive")
-    assert cli.service_exe() == '"/opt/my tools/100%%/hive"'
-    assert cli.unit_quote("/usr/bin/hive") == "/usr/bin/hive"
-    assert cli.unit_quote("a$b") == "a$$b"
+    monkeypatch.setattr("hive.service.shutil.which", lambda name: "/opt/my tools/100%/hive")
+    assert service_exe() == '"/opt/my tools/100%%/hive"'
+    assert unit_quote("/usr/bin/hive") == "/usr/bin/hive"
+    assert unit_quote("a$b") == "a$$b"
 
 
 # --- U1, R15: warnings when panes start ---------------------------------------
 
 def pane(command):
-    return SimpleNamespace(name="t-a-1", type="a", index=1, dir="/tmp", command=command, args=())
+    return SimpleNamespace(name="t-a-1", type="a", index=1, dir="/tmp", command=command, args=(),
+                           system="claude")
 
 
 def test_preflight_warns_about_missing_program_and_remote_control(env, monkeypatch, capsys):
-    cfg = cli.load_config()
-    cli.preflight(cfg, pane("nosuchprogram-hive FOO {name}"))
+    cfg = load_config()
+    preflight(cfg, pane("nosuchprogram-hive FOO {name}"))
     err = capsys.readouterr().err
     assert "hive: warning: t-a-1: command has no --remote-control" in err
     assert "'nosuchprogram-hive' not found in PATH" in err
-    cli.preflight(cfg, pane("FOO=1 sh {name} --remote-control"))
+    preflight(cfg, pane("FOO=1 sh {name} --remote-control"))
     assert capsys.readouterr().err == ""
 
 
@@ -449,23 +458,24 @@ def test_preflight_is_not_run_by_list(env, monkeypatch, capsys):
 
 def test_reconcile_summarizes_skipped_agents(env, monkeypatch, capsys):
     fake = FakeTmux()
-    monkeypatch.setattr(cli, "tmux", fake)
-    monkeypatch.setattr(cli, "running_panes", lambda cfg: ({}, []))
-    monkeypatch.setattr(cli, "session_running", lambda cfg: True)
-    monkeypatch.setattr(cli, "warn_untrusted", lambda cfg, p: None)
-    monkeypatch.setattr(cli, "start_pane", lambda *a: "%2")
-    monkeypatch.setattr(cli, "window_ids", lambda cfg: {})
-    monkeypatch.setattr(cli, "materialize_queen", lambda cfg: None)
+    monkeypatch.setattr("hive.tmux.tmux", fake)
+    monkeypatch.setattr("hive.tmux.running_panes", lambda cfg: ({}, []))
+    monkeypatch.setattr("hive.tmux.session_running", lambda cfg: True)
+    monkeypatch.setattr("hive.lifecycle.warn_untrusted", lambda cfg, p: None)
+    monkeypatch.setattr("hive.tmux.start_pane", lambda *a: "%2")
+    monkeypatch.setattr("hive.tmux.window_ids", lambda cfg: {})
+    monkeypatch.setattr("hive.lifecycle.materialize_queen", lambda cfg: None)
     env.cfg.write_text(BASE + f'\n[[agents]]\ntype = "gone"\ndir = "{env.tmp / "gone"}"\ncount = 2\n')
-    assert cli.reconcile(cli.load_config()) == 0
+    assert reconcile(load_config()) == 0
     err = capsys.readouterr().err
     assert "hive: warning: 1 agent(s) skipped: dir missing; see 'hive list'" in err
 
 
 def test_untrusted_warning_has_prefix_and_remedy(env, capsys):
-    cfg = cli.load_config()
-    cli.warn_untrusted(cfg, pane("x").__class__(name="t-queen", type="queen", index=1,
-                                                dir=str(env.tmp), command="x", config_dir=None))
+    cfg = load_config()
+    warn_untrusted(cfg, pane("x").__class__(name="t-queen", type="queen", index=1,
+                                            dir=str(env.tmp), command="x", config_dir=None,
+                                            system="claude"))
     err = capsys.readouterr().err
     assert err.startswith(f"hive: warning: untrusted t-queen {env.tmp}")
     assert "trust prompt" in err and "--trust" in err
@@ -499,12 +509,12 @@ def test_help_texts(monkeypatch, capsys):
 
 def test_queen_flags_are_added_once():
     base = "claude -n {name} --remote-control {name}"
-    line = cli.queen_command_line(base)
-    assert line == f"{base} --tools {cli.QUEEN_TOOLS} --strict-mcp-config"
-    assert cli.queen_command_line(line) == line
-    own = cli.queen_command_line("c --tools Read --strict-mcp-config")
+    line = queen_command_line(base)
+    assert line == f"{base} --tools {QUEEN_TOOLS} --strict-mcp-config"
+    assert queen_command_line(line) == line
+    own = queen_command_line("c --tools Read --strict-mcp-config")
     assert own == "c --tools Read --strict-mcp-config"
-    assert cli.queen_command_line("c --tools=Read").count("--tools") == 1
+    assert queen_command_line("c --tools=Read").count("--tools") == 1
 
 
 def test_queen_tools_match_guard():
@@ -515,7 +525,7 @@ def test_queen_tools_match_guard():
     spec = importlib.util.spec_from_file_location("hive_guard", path)
     guard = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(guard)
-    assert set(cli.QUEEN_TOOLS.split(",")) == guard.QUEEN_TOOLS
+    assert set(QUEEN_TOOLS.split(",")) == guard.QUEEN_TOOLS
 
 
 
@@ -530,7 +540,7 @@ def profile_cfg(env, name, text):
 
 def test_lenient_down_refuses_collision(env, monkeypatch, capsys):
     fake = FakeTmux()
-    monkeypatch.setattr(cli, "tmux", fake)
+    monkeypatch.setattr("hive.tmux.tmux", fake)
     profile_cfg(env, "t", 'tmux_socket = "hive"\nbogus = [\n')
     code, _, err = hive(monkeypatch, capsys, "--profile", "t", "down")
     assert code == 2 and "is the default profile's socket" in err
@@ -559,7 +569,7 @@ def test_profile_unit_name(env, monkeypatch, capsys):
 
 def test_restart_named_profile_never_checks_hive_service(env, monkeypatch, capsys):
     log = fake_bin(env.tmp, monkeypatch, "systemctl", "exit 1")  # unit not active
-    monkeypatch.setattr(cli, "tmux", FakeTmux())
+    monkeypatch.setattr("hive.tmux.tmux", FakeTmux())
     profile_cfg(env, "t", BASE.replace(SOCKET, SOCKET + "-t") + '\n[queen]\nenabled = false\n')
     code, out, _ = hive(monkeypatch, capsys, "--profile", "t", "restart")
     assert code == 0 and "nothing to start" in out
@@ -579,8 +589,8 @@ DISABLED = BASE + '\n[queen]\nenabled = false\n'
 
 def test_up_empty_hive(env, monkeypatch, capsys):
     fake = FakeTmux()
-    monkeypatch.setattr(cli, "tmux", fake)
-    monkeypatch.setattr(cli, "session_running", lambda cfg: False)
+    monkeypatch.setattr("hive.tmux.tmux", fake)
+    monkeypatch.setattr("hive.tmux.session_running", lambda cfg: False)
     env.cfg.write_text(DISABLED)
     code, out, _ = hive(monkeypatch, capsys, "up")
     assert code == 0 and out == "nothing to start: queen disabled and no agents\n"
@@ -590,8 +600,8 @@ def test_up_empty_hive(env, monkeypatch, capsys):
 
 def test_up_first_pane_is_worker(env, monkeypatch, capsys):
     fake = FakeTmux()
-    monkeypatch.setattr(cli, "tmux", fake)
-    monkeypatch.setattr(cli, "reconcile", lambda cfg, **kw: 0)
+    monkeypatch.setattr("hive.tmux.tmux", fake)
+    monkeypatch.setattr("hive.lifecycle.reconcile", lambda cfg, **kw: 0)
     (env.tmp / "w").mkdir()
     env.cfg.write_text(DISABLED + f'\n[[agents]]\ntype = "w"\ndir = "{env.tmp / "w"}"\n')
     code, out, _ = hive(monkeypatch, capsys, "up")
@@ -601,10 +611,10 @@ def test_up_first_pane_is_worker(env, monkeypatch, capsys):
 
 
 def test_list_queen_disabled(env, monkeypatch, capsys):
-    monkeypatch.setattr(cli, "session_running", lambda cfg: True)
-    monkeypatch.setattr(cli, "tmux", FakeTmux())
-    queen = cli.RunningPane("%0", "@0", "hive-queen-t", "hive-queen-t", "queen", 1, False)
-    monkeypatch.setattr(cli, "running_panes", lambda cfg: ({"hive-queen-t": queen}, []))
+    monkeypatch.setattr("hive.tmux.session_running", lambda cfg: True)
+    monkeypatch.setattr("hive.tmux.tmux", FakeTmux())
+    queen = RunningPane("%0", "@0", "hive-queen-t", "hive-queen-t", "queen", 1, False)
+    monkeypatch.setattr("hive.tmux.running_panes", lambda cfg: ({"hive-queen-t": queen}, []))
     env.cfg.write_text(DISABLED)
     code, out, _ = hive(monkeypatch, capsys, "list")
     lines = out.splitlines()

@@ -20,7 +20,8 @@ class Pane:
     command: str  # unexpanded template
     env: dict = field(default_factory=dict)  # the type's own env, exported after [env]
     config_dir: str | None = None  # Claude config dir of the command; locates the trust file
-    args: tuple = ()  # extra flags for the command, placed by cli.expand_command
+    args: tuple = ()  # extra flags for the command, placed by launch.expand_command
+    system: str = "claude"  # the driver (hive.drivers) that runs the command
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,33 @@ def queen_name(prefix):
     return f"hive-queen-{prefix}"
 
 
+def parse_name(prefix, name):
+    """Return (type, index) for a hive pane name, or None if it is not one.
+
+    Names are `hive-queen-<prefix>` and `<type>-<prefix>-<N>`.
+    """
+    if name == queen_name(prefix):
+        return "queen", 1
+    rest, _, index = name.rpartition("-")
+    suffix = "-" + prefix
+    if index.isdigit() and rest.endswith(suffix) and len(rest) > len(suffix):
+        return rest[:-len(suffix)], int(index)
+    return None
+
+
+def parse_legacy_name(prefix, name):
+    """Like parse_name, for the pre-launcher forms `<prefix>-queen`, `<prefix>-<type>-<N>`."""
+    if not name.startswith(prefix + "-"):
+        return None
+    rest = name[len(prefix) + 1:]
+    if rest == "queen":
+        return "queen", 1
+    kind, _, index = rest.rpartition("-")
+    if kind and index.isdigit():
+        return kind, int(index)
+    return None
+
+
 def desired_panes(cfg):
     """The queen first (unless disabled), then each agent type in config order, indices 1..count."""
     prefix = cfg["prefix"]
@@ -47,13 +75,14 @@ def desired_panes(cfg):
     if queen.get("enabled", True):
         panes.append(Pane(name, name, "queen", 1, queen["dir"], queen["command"],
                           queen.get("env", {}), queen.get("config_dir"),
-                          tuple(queen.get("args", ()))))
+                          tuple(queen.get("args", ())), queen.get("system", "claude")))
     for agent in cfg["agents"]:
         window = f"{agent['type']}-{prefix}"
         for i in range(1, agent["count"] + 1):
             panes.append(Pane(f"{window}-{i}", window, agent["type"], i,
                               agent["dir"], agent["command"], agent.get("env", {}),
-                              agent.get("config_dir"), tuple(agent.get("args", ()))))
+                              agent.get("config_dir"), tuple(agent.get("args", ())),
+                              agent.get("system", "claude")))
     return panes
 
 

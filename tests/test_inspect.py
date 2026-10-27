@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from hive import cli
+from hive.config import load_config
 from hive.inspect import (LauncherNotFound, LauncherRefused, inspect_launcher,
                           is_private, resolve_launcher)
 
@@ -102,12 +102,12 @@ def test_inspect_roots_config(tmp_path, monkeypatch):
     path = tmp_path / "hive" / "config.toml"
     path.parent.mkdir(parents=True)
     path.write_text('inspect_roots = ["~/bin", "/opt"]\n[defaults]\ncommand = "c"\n')
-    assert cli.load_config()["inspect_roots"] == [os.path.expanduser("~/bin"), "/opt"]
+    assert load_config()["inspect_roots"] == [os.path.expanduser("~/bin"), "/opt"]
     path.write_text('[defaults]\ncommand = "c"\n')
-    assert cli.load_config()["inspect_roots"][0] == os.path.expanduser("~/.local/bin")
+    assert load_config()["inspect_roots"][0] == os.path.expanduser("~/.local/bin")
     path.write_text('inspect_roots = ["bin"]\n[defaults]\ncommand = "c"\n')
     with pytest.raises(SystemExit):
-        cli.load_config()
+        load_config()
 
 
 def test_unreadable_script_is_reported(bindir):

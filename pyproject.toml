@@ -22,7 +22,7 @@ hive = "hive.cli:main"
 dev = ["pytest>=8"]
 
 [tool.setuptools]
-packages = ["hive"]
+packages = ["hive", "hive.drivers"]
 
 [tool.setuptools.package-data]
 hive = ["config.example.toml", "queen/*", "queen/hooks/*"]

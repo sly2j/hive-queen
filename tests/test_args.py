@@ -9,7 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from hive import cli
+from hive.config import load_config
+from hive.drivers.claude import QUEEN_TOOLS
+from hive.launch import expand_command, expand_pane
 from hive.configedit import append_agent, verify
 from hive.reconcile import desired_panes
 
@@ -38,7 +40,7 @@ def write(tmp_path, monkeypatch):
 
 def fails(capsys, text_in_error, code=2):
     with pytest.raises(SystemExit) as exc:
-        cli.load_config()
+        load_config()
     assert exc.value.code == code
     err = capsys.readouterr().err
     assert err.startswith("hive: error: ")
@@ -57,7 +59,7 @@ def with_defaults(line):
 
 def test_args_inherited_from_defaults(write):
     write(with_defaults('args = ["--fable"]') + agent())
-    cfg = cli.load_config()
+    cfg = load_config()
     assert cfg["agents"][0]["args"] == ["--fable"]
     assert cfg["queen"]["args"] == ["--fable"]
 
@@ -65,21 +67,21 @@ def test_args_inherited_from_defaults(write):
 def test_agent_args_replace_defaults(write):
     write(with_defaults('args = ["--fable", "--x"]')
           + agent('args = ["--y"]\n') + agent("args = []\n", "b", "/b"))
-    cfg = cli.load_config()
+    cfg = load_config()
     assert cfg["agents"][0]["args"] == ["--y"]
     assert cfg["agents"][1]["args"] == []
 
 
 def test_queen_own_args(write):
     write(with_defaults('args = ["--fable"]') + '\n[queen]\nargs = ["--q"]\n' + agent())
-    cfg = cli.load_config()
+    cfg = load_config()
     assert cfg["queen"]["args"] == ["--q"]
     assert cfg["agents"][0]["args"] == ["--fable"]
 
 
 def test_args_absent_everywhere(write):
     write(BASE + agent())
-    cfg = cli.load_config()
+    cfg = load_config()
     assert cfg["agents"][0]["args"] == [] and cfg["queen"]["args"] == []
 
 
@@ -108,14 +110,14 @@ def test_args_invalid(write, capsys, where, bad):
     ("claude {name}", ["--tag={name}"], "claude n --tag=n"),
 ])
 def test_expand_command(command, args, expected):
-    assert cli.expand_command(command, args, name="n") == expected
+    assert expand_command(command, args, name="n") == expected
 
 
 # 3. panes
 
 def test_desired_panes_carry_args(write):
     write(with_defaults('args = ["--fable"]') + agent('args = ["--y"]\n', dir_="/tmp"))
-    panes = desired_panes(cli.load_config())
+    panes = desired_panes(load_config())
     assert panes[0].type == "queen" and tuple(panes[0].args) == ("--fable",)
     assert tuple(panes[1].args) == ("--y",)
 
@@ -223,7 +225,7 @@ def test_spawn_sandbox_args_from_record_and_override(hive, tmp_path):
 
 def queen_cfg(write, queen_args):
     write(BASE + f"\n[queen]\nargs = {queen_args}\n" + agent())
-    return cli.load_config()["queen"]
+    return load_config()["queen"]
 
 
 def test_queen_tools_arg_suppresses_hive_tools(write):
@@ -237,7 +239,7 @@ def test_queen_tools_arg_suppresses_hive_tools(write):
                                   '["--append-system-prompt", "use --tools and --strict-mcp-config"]'])
 def test_queen_plain_args_keep_full_allowlist(write, args):
     q = queen_cfg(write, args)
-    assert f"--tools {cli.QUEEN_TOOLS}" in q["command"]
+    assert f"--tools {QUEEN_TOOLS}" in q["command"]
     assert "--strict-mcp-config" in q["command"]
 
 
@@ -291,10 +293,10 @@ def test_spawn_unbalanced_record_args_names_launcher(hive, tmp_path):
 
 def test_expanded_pane_uses_instance_name_with_args(write):
     write(with_defaults('args = ["--fable"]') + agent(dir_="/tmp"))
-    cfg = cli.load_config()
+    cfg = load_config()
     pane = desired_panes(cfg)[1]
     assert pane.name == "a-t-1"
-    assert cli.expand_pane(cfg, pane) == "claude -n a-t-1 --remote-control a-t-1 --fable"
+    assert expand_pane(cfg, pane) == "claude -n a-t-1 --remote-control a-t-1 --fable"
 
 
 def test_spawn_empty_arg_refused(hive, tmp_path):

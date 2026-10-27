@@ -4,6 +4,7 @@ import sys
 import pytest
 
 from hive import cli, dirs
+from hive.roots import same_dir
 
 BASE = '[defaults]\ncommand = "claude -n {name} --remote-control {name}"\n'
 
@@ -204,10 +205,10 @@ def test_roots_darwin_matches_case_variant_by_file_identity(tree, monkeypatch):
     work = (tree / "work").resolve()
     swapped = work.parent / "WORK"
     insensitive = swapped.exists()
-    assert cli.same_dir(str(swapped), work) == insensitive
-    assert cli.same_dir(str(tree / "notes"), work) is False
+    assert same_dir(str(swapped), work) == insensitive
+    assert same_dir(str(tree / "notes"), work) is False
     monkeypatch.setattr(sys, "platform", "linux")
-    assert cli.same_dir(str(swapped), work) is False
+    assert same_dir(str(swapped), work) is False
 
 
 def test_dirs_case_variant_target_on_darwin(tree, monkeypatch, capsys):

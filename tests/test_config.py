@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from hive import cli
+from hive import cli, lock
+from hive.config import cmd_init, load_config, profile_name
+from hive.drivers.claude import DEFAULT_QUEEN_COMMAND, QUEEN_TOOLS
+from hive.reconcile import desired_panes, parse_legacy_name, parse_name
+from hive.service import unit_name
+from hive.tmux import shell_line, tmux_env
 
 BASE = """\
 prefix = "t"
@@ -15,7 +20,7 @@ command = "claude -n {name} --remote-control {name}"
 """
 
 
-QUEEN_FLAGS = f" --tools {cli.QUEEN_TOOLS} --strict-mcp-config"
+QUEEN_FLAGS = f" --tools {QUEEN_TOOLS} --strict-mcp-config"
 
 
 @pytest.fixture
@@ -33,7 +38,7 @@ def write(tmp_path, monkeypatch):
 
 def fails(capsys, text_in_error, code=2):
     with pytest.raises(SystemExit) as exc:
-        cli.load_config()
+        load_config()
     assert exc.value.code == code
     err = capsys.readouterr().err
     assert err.startswith("hive: error: ")
@@ -44,11 +49,11 @@ def test_1_5_config_loads_with_queen_defaults(write, tmp_path):
     write(BASE.replace('prefix = "t"\n', 'prefix = "swarm"\nsession = "swarm-agents"\n')
           + f'\n[env]\n# X = "y"\n\n[service]\nafter = ["a.service"]\n\n'
           f'[[agents]]\ntype = "obsidian"\ndir = "{tmp_path}"\ncount = 4\n')
-    cfg = cli.load_config()
+    cfg = load_config()
     assert cfg["queen"] == {"type": "queen", "dir": str(tmp_path / "hive" / "queen"),
                             "command": "claude -n {name} --remote-control {name}" + QUEEN_FLAGS,
                             "args": [], "env": {},
-                            "config_dir": None, "enabled": True}
+                            "config_dir": None, "enabled": True, "system": "claude"}
     assert cfg["queen"]["command"] == cfg["agents"][0]["command"] + QUEEN_FLAGS
     assert cfg["search_roots"] == []
     assert cfg["discover"] is None
@@ -57,14 +62,14 @@ def test_1_5_config_loads_with_queen_defaults(write, tmp_path):
 
 def test_queen_table_and_search_roots(write, tmp_path):
     write(BASE + '\n[queen]\ncommand = "q {name} --remote-control"\ndiscover = "echo hi"\n')
-    cfg = cli.load_config()
+    cfg = load_config()
     assert cfg["queen"]["command"] == "q {name} --remote-control" + QUEEN_FLAGS
     assert cfg["discover"] == "echo hi"
 
 
 def test_search_roots_expanded(write):
     write('search_roots = ["~/work", "/srv"]\n' + BASE)
-    roots = cli.load_config()["search_roots"]
+    roots = load_config()["search_roots"]
     assert roots[1] == "/srv"
     assert roots[0].endswith("/work") and "~" not in roots[0]
 
@@ -98,12 +103,12 @@ def test_queen_command_must_be_str(write, capsys):
 
 def test_queen_command_falls_back_to_builtin(write):
     write('prefix = "t"\n')
-    assert cli.load_config()["queen"]["command"] == cli.DEFAULT_QUEEN_COMMAND + QUEEN_FLAGS
+    assert load_config()["queen"]["command"] == DEFAULT_QUEEN_COMMAND + QUEEN_FLAGS
 
 
 def test_queen_command_without_defaults(write):
     write('prefix = "t"\n[queen]\ncommand = "q"\n')
-    assert cli.load_config()["queen"]["command"] == "q" + QUEEN_FLAGS
+    assert load_config()["queen"]["command"] == "q" + QUEEN_FLAGS
 
 
 def test_reserved_queen_type(write, capsys, tmp_path):
@@ -113,7 +118,7 @@ def test_reserved_queen_type(write, capsys, tmp_path):
 
 def test_count_zero_loads(write, tmp_path):
     write(BASE + f'\n[[agents]]\ntype = "a"\ndir = "{tmp_path}"\ncount = 0\n')
-    assert cli.load_config()["agents"][0]["count"] == 0
+    assert load_config()["agents"][0]["count"] == 0
 
 
 def test_count_negative(write, capsys, tmp_path):
@@ -123,15 +128,15 @@ def test_count_negative(write, capsys, tmp_path):
 
 def test_empty_agents_loads(write):
     write(BASE)
-    assert cli.load_config()["agents"] == []
+    assert load_config()["agents"] == []
     write("agents = []\n" + BASE)
-    assert cli.load_config()["agents"] == []
+    assert load_config()["agents"] == []
 
 
 def test_all_zero_counts_load(write, tmp_path):
     write(BASE + f'\n[[agents]]\ntype = "a"\ndir = "{tmp_path}"\ncount = 0\n'
           f'\n[[agents]]\ntype = "b"\ndir = "{tmp_path}"\ncount = 0\n')
-    assert [a["count"] for a in cli.load_config()["agents"]] == [0, 0]
+    assert [a["count"] for a in load_config()["agents"]] == [0, 0]
 
 
 def test_per_type_env_and_config_dir(write, tmp_path, monkeypatch):
@@ -140,13 +145,13 @@ def test_per_type_env_and_config_dir(write, tmp_path, monkeypatch):
           'config_dir = "~/.claude-q"\n'
           f'\n[[agents]]\ntype = "a"\ndir = "{tmp_path}"\nenv = {{ B = "t", C = "$HOME/x" }}\n'
           'config_dir = "/sandbox/cc"\n')
-    cfg = cli.load_config()
+    cfg = load_config()
     assert cfg["queen"]["env"] == {"Q": "1"}
     assert cfg["queen"]["config_dir"] == str(tmp_path / ".claude-q")
     agent = cfg["agents"][0]
     assert agent["env"] == {"B": "t", "C": "$HOME/x"}
     assert agent["config_dir"] == "/sandbox/cc"
-    line = cli.shell_line(cfg, "/d", "run", agent["env"])
+    line = shell_line(cfg, "/d", "run", agent["env"])
     assert line == ('export A="g" && export B="g" && export B="t" && export C="$HOME/x"'
                     ' && cd /d && run')
     # config_dir only locates the trust file; it is never exported
@@ -179,11 +184,11 @@ def test_init_writes_a_config_that_up_accepts(tmp_path, monkeypatch, capsys):
     # A fresh deploy: no project dirs exist, so the example must not reference any.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    assert cli.cmd_init(None) == 0
-    cfg = cli.load_config()
+    assert cmd_init(None) == 0
+    cfg = load_config()
     assert cfg["agents"] == []
-    assert cfg["queen"]["command"] == cli.DEFAULT_QUEEN_COMMAND + QUEEN_FLAGS
-    assert [p.name for p in cli.desired_panes(cfg)] == [f"hive-queen-{cfg['prefix']}"]
+    assert cfg["queen"]["command"] == DEFAULT_QUEEN_COMMAND + QUEEN_FLAGS
+    assert [p.name for p in desired_panes(cfg)] == [f"hive-queen-{cfg['prefix']}"]
     assert cfg["launchers"] == [] and cfg["default_launcher"] is None
 
 
@@ -194,35 +199,35 @@ def test_env_names_are_checked(write, capsys):
 
 def test_missing_agent_dir_is_not_a_load_error(write, tmp_path):
     write(BASE + f'\n[[agents]]\ntype = "gone"\ndir = "{tmp_path / "gone"}"\n')
-    assert cli.load_config()["agents"][0]["type"] == "gone"
+    assert load_config()["agents"][0]["type"] == "gone"
 
 
 def test_parse_name_hyphenated_type():
-    assert cli.parse_name("t", "t-x-t-1") == ("t-x", 1)
-    assert cli.parse_name("t", "hive-queen-t") == ("queen", 1)
+    assert parse_name("t", "t-x-t-1") == ("t-x", 1)
+    assert parse_name("t", "hive-queen-t") == ("queen", 1)
     # a user type `hive` does not collide with the queen
-    assert cli.parse_name("t", "hive-t-1") == ("hive", 1)
+    assert parse_name("t", "hive-t-1") == ("hive", 1)
     # the queen is matched exactly, never by prefix
-    assert cli.parse_name("gpu07", "hive-queen-gpu07") == ("queen", 1)
-    assert cli.parse_name("gpu07", "hive-queen-gpu07-1") != ("queen", 1)
+    assert parse_name("gpu07", "hive-queen-gpu07") == ("queen", 1)
+    assert parse_name("gpu07", "hive-queen-gpu07-1") != ("queen", 1)
     # numeric and dotted prefixes
-    assert cli.parse_name("1", "a-1-2") == ("a", 2)
-    assert cli.parse_name("1", "hive-queen-1") == ("queen", 1)
-    assert cli.parse_name("g.1-x", "a-g.1-x-3") == ("a", 3)
-    assert cli.parse_name("t", "a-u-1") is None
-    assert cli.parse_name("t", "-t-1") is None
+    assert parse_name("1", "a-1-2") == ("a", 2)
+    assert parse_name("1", "hive-queen-1") == ("queen", 1)
+    assert parse_name("g.1-x", "a-g.1-x-3") == ("a", 3)
+    assert parse_name("t", "a-u-1") is None
+    assert parse_name("t", "-t-1") is None
 
 
 def test_parse_legacy_name():
-    assert cli.parse_legacy_name("t", "t-queen") == ("queen", 1)
-    assert cli.parse_legacy_name("t", "t-a-2") == ("a", 2)
-    assert cli.parse_legacy_name("t", "t-b-api-1") == ("b-api", 1)
-    assert cli.parse_legacy_name("t", "x-a-1") is None
+    assert parse_legacy_name("t", "t-queen") == ("queen", 1)
+    assert parse_legacy_name("t", "t-a-2") == ("a", 2)
+    assert parse_legacy_name("t", "t-b-api-1") == ("b-api", 1)
+    assert parse_legacy_name("t", "x-a-1") is None
 
 
 def test_hive_type_names_distinct_from_queen(write, tmp_path):
     write(BASE + f'\n[[agents]]\ntype = "hive"\ndir = "{tmp_path}"\n')
-    names = [p.name for p in cli.desired_panes(cli.load_config())]
+    names = [p.name for p in desired_panes(load_config())]
     assert names == ["hive-queen-t", "hive-t-1"]
 
 
@@ -261,7 +266,7 @@ def run_hive(monkeypatch, capsys, *argv):
 
 def test_launchers_parsed(write):
     write(LAUNCHERS)
-    cfg = cli.load_config()
+    cfg = load_config()
     assert [l["name"] for l in cfg["launchers"]] == ["a", "b"]
     assert cfg["launchers"][1]["config_dir"] == "/cc/b"
     assert cfg["launchers"][1]["description"] == "the b one"
@@ -291,7 +296,7 @@ def test_launcher_command_needs_placeholders(write, capsys):
 
 def test_default_launcher_unknown_registry_ok(write):
     write(BASE.replace("[defaults]\n", '[defaults]\nlauncher = "elsewhere"\n'))
-    assert cli.load_config()["default_launcher"] == "elsewhere"
+    assert load_config()["default_launcher"] == "elsewhere"
 
 
 def test_launchers_list_default_first(write, monkeypatch, capsys):
@@ -348,12 +353,12 @@ def test_launchers_add_ok(write, tmp_path, monkeypatch, capsys):
     code, out, _ = run_hive(monkeypatch, capsys, "launchers", "add", "mine", CMD.format(tool),
                             "--config-dir", "/cc/mine", "--description", "my one")
     assert code == 0 and out[0].startswith('launcher added name="mine" default=yes')
-    cfg = cli.load_config()
+    cfg = load_config()
     assert cfg["default_launcher"] == "mine"
     assert cfg["launchers"][0]["config_dir"] == "/cc/mine"
     code, out, _ = run_hive(monkeypatch, capsys, "launchers", "add", "second", CMD.format(tool))
     assert code == 0 and "default=no" in out[0]
-    assert cli.load_config()["default_launcher"] == "mine"
+    assert load_config()["default_launcher"] == "mine"
     code, out, _ = run_hive(monkeypatch, capsys, "launchers")
     assert [l.split()[1] for l in out] == ['name="mine"', 'name="second"']
     assert path.read_text().startswith(BASE.replace("[defaults]\n", '[defaults]\nlauncher = "mine"\n'))
@@ -369,7 +374,7 @@ def test_launchers_add_symlink_outside_roots(write, tmp_path, monkeypatch, capsy
     code, out, err = run_hive(monkeypatch, capsys, "launchers", "add", "viapath",
                               "claude -n {name} --remote-control {name}")
     assert code == 0, err
-    assert [l["name"] for l in cli.load_config()["launchers"]] == ["viapath"]
+    assert [l["name"] for l in load_config()["launchers"]] == ["viapath"]
 
 
 def test_launchers_add_duplicate(write, tmp_path, monkeypatch, capsys):
@@ -409,7 +414,7 @@ def test_launchers_default_set(write, tmp_path, monkeypatch, capsys):
     for name in ("b", "x"):
         code, out, _ = run_hive(monkeypatch, capsys, "launchers", "default", name)
         assert code == 0 and out[0].startswith(f'default launcher="{name}"')
-        assert cli.load_config()["default_launcher"] == name
+        assert load_config()["default_launcher"] == name
 
 
 def test_launchers_default_unknown(write, monkeypatch, capsys):
@@ -433,41 +438,41 @@ def write_profile(tmp_path, name, text):
 def profile(tmp_path, monkeypatch):
     """XDG_CONFIG_HOME = tmp_path; select a profile with the option (like --profile)."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    monkeypatch.setattr(cli, "_profile_option", None)
+    monkeypatch.setattr("hive.config._profile_option", None)
 
     def select(name):
-        monkeypatch.setattr(cli, "_profile_option", name)
+        monkeypatch.setattr("hive.config._profile_option", name)
     return select
 
 
 def test_profile_paths(profile, tmp_path, monkeypatch):
     profile("t")
     write_profile(tmp_path, "t", BASE)
-    cfg = cli.load_config()
+    cfg = load_config()
     pdir = tmp_path / "hive" / "profiles" / "t"
     assert cfg["config_path"] == str(pdir / "config.toml")
     assert cfg["queen"]["dir"] == str(pdir / "queen")
-    monkeypatch.setattr(cli, "_lock", None)
-    cli.hold_lock()
-    cli._lock.close()
+    monkeypatch.setattr("hive.lock._lock", None)
+    lock.hold_lock()
+    lock._lock.close()
     assert (pdir / ".lock").exists() and not (tmp_path / "hive" / ".lock").exists()
 
 
 def test_profile_env_vs_option(profile, monkeypatch):
     monkeypatch.setenv("HIVE_PROFILE", "a")
-    assert cli.profile_name() == "a"
+    assert profile_name() == "a"
     profile("b")
-    assert cli.profile_name() == "b"
+    assert profile_name() == "b"
     profile("default")
-    assert cli.profile_name() is None and cli.unit_name() == "hive.service"
+    assert profile_name() is None and unit_name() == "hive.service"
 
 
 def test_profile_defaults(profile, tmp_path):
     profile("t")
     write_profile(tmp_path, "t", '[defaults]\ncommand = "c {name} --remote-control"\n')
-    cfg = cli.load_config()
+    cfg = load_config()
     assert (cfg["prefix"], cfg["session"], cfg["socket"]) == ("t", "t-agents", "hive-t")
-    assert cfg["profile"] == "t" and cli.unit_name() == "hive-t.service"
+    assert cfg["profile"] == "t" and unit_name() == "hive-t.service"
 
 
 @pytest.mark.parametrize("default_text", [None, 'tmux_socket = "prod"\n', "not toml [",
@@ -516,17 +521,17 @@ def test_invalid_profile_name(profile, capsys, monkeypatch):
 def test_pane_exports_profile(profile, tmp_path):
     profile("t")
     write_profile(tmp_path, "t", BASE + '\n[env]\nHIVE_PROFILE = "other"\n')
-    line = cli.shell_line(cli.load_config(), "/d", "run")
+    line = shell_line(load_config(), "/d", "run")
     # last export wins, so a pane always addresses its own profile
     assert line.endswith("export HIVE_PROFILE=t && cd /d && run")
     profile(None)
     (tmp_path / "hive" / "config.toml").write_text(BASE)
-    assert "HIVE_PROFILE" not in cli.shell_line(cli.load_config(), "/d", "run")
+    assert "HIVE_PROFILE" not in shell_line(load_config(), "/d", "run")
 
 
 def test_tmux_server_env_drops_hive_profile(monkeypatch):
     monkeypatch.setenv("HIVE_PROFILE", "t")
-    assert "HIVE_PROFILE" not in cli.tmux_env()
+    assert "HIVE_PROFILE" not in tmux_env()
 
 
 def test_queen_enabled_must_be_bool(write, capsys):

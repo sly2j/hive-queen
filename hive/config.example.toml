@@ -18,6 +18,8 @@
 # Placeholders: {name} = "<type>-<machine>-<index>" (machine = prefix), {type}, {index}, {dir}, {prefix}, {args}
 command = "claude -n {name} --remote-control {name} --permission-mode auto"
 # launcher = "claude"            # default launcher for new types; a [[launchers]] name or a discover name
+# system = "claude"              # agent system that runs the commands; only "claude" so far. Also settable
+#   per [[launchers]], per [[agents]] and in [queen]; an agent's or the queen's own value wins over this one.
 # args = ["--fable"]            # extra launcher flags: list of non-empty strings, each shell-quoted (placeholders expanded first).
 #   Placed at {args} in the command, else appended at the end. A per-type or [queen] args replaces this list, no merge.
 #   A launcher that takes flags before "--" needs {args}: command = "claude-supervisor run api {args} -- -n {name} --remote-control {name}"
